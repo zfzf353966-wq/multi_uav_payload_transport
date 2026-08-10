@@ -11,9 +11,9 @@ depot:
   uav_spawn_points:
     # Pad top is z=0.125 m. Starting just above it prevents landing-gear
     # penetration and the long motor-spool/contact transient at takeoff.
-    - [-32.0, -23.0, 0.13]
+    - [-34.0, -23.0, 0.13]
     - [-30.0, -23.0, 0.13]
-    - [-28.0, -23.0, 0.13]
+    - [-26.0, -23.0, 0.13]
 
 # Axis-aligned building boxes: center [x, y, z], size [x, y, z].
 static_obstacles:
@@ -51,6 +51,13 @@ planning:
   maximum_flight_altitude: 32.0
   makespan_weight: 100
   solver_time_limit_seconds: 10
+  trajectory_sample_period: 0.1
+  maximum_acceleration: 2.0
+  corner_radius: 1.0
+  # Extra offline margin absorbs PX4 tracking error; runtime protection uses
+  # a 2.5 m hard separation threshold.
+  minimum_uav_separation: 4.0
+  schedule_step: 0.5
 
 tree_positions:
   - [-37.0, -10.0, 0.0]

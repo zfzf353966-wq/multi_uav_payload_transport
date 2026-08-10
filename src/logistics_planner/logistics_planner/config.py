@@ -23,6 +23,11 @@ class PlanningSettings:
     maximum_flight_altitude: float
     makespan_weight: int
     solver_time_limit_seconds: int
+    trajectory_sample_period: float
+    maximum_acceleration: float
+    corner_radius: float
+    minimum_uav_separation: float
+    schedule_step: float
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,7 @@ class WorldConfig:
     minimum: Point3D
     maximum: Point3D
     depot: Location
+    uav_spawn_points: tuple[Point3D, ...]
     pickups: tuple[Location, ...]
     deliveries: tuple[Location, ...]
     obstacles: tuple[Obstacle, ...]
@@ -83,6 +89,7 @@ def load_world_config(path: str | Path) -> WorldConfig:
         minimum=_point(bounds["min"]),
         maximum=_point(bounds["max"]),
         depot=Location("depot", _point(raw["depot"]["approach_position"])),
+        uav_spawn_points=tuple(_point(point) for point in raw["depot"]["uav_spawn_points"]),
         pickups=pickups,
         deliveries=deliveries,
         obstacles=obstacles,
@@ -100,5 +107,10 @@ def load_world_config(path: str | Path) -> WorldConfig:
             maximum_flight_altitude=float(planning["maximum_flight_altitude"]),
             makespan_weight=int(planning["makespan_weight"]),
             solver_time_limit_seconds=int(planning["solver_time_limit_seconds"]),
+            trajectory_sample_period=float(planning["trajectory_sample_period"]),
+            maximum_acceleration=float(planning["maximum_acceleration"]),
+            corner_radius=float(planning["corner_radius"]),
+            minimum_uav_separation=float(planning["minimum_uav_separation"]),
+            schedule_step=float(planning["schedule_step"]),
         ),
     )

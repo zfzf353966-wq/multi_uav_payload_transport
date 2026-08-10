@@ -154,12 +154,12 @@ start_group "${RUN_DIR}/micro_xrce_agent.log" MicroXRCEAgent udp4 -p 8888
 sleep 1
 
 echo "Starting PX4 instance 1 and Gazebo Harmonic..."
-start_px4 1 "-32,-23,0.13" 0
+start_px4 1 "-34,-23,0.13" 0
 wait_for_gazebo
 
 echo "Starting PX4 instances 2 and 3..."
 start_px4 2 "-30,-23,0.13" 1
-start_px4 3 "-28,-23,0.13" 1
+start_px4 3 "-26,-23,0.13" 1
 
 echo "Three-UAV simulation is running."
 echo "Gazebo world: ${WORLD_NAME}"

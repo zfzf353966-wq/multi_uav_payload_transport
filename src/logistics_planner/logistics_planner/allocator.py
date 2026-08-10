@@ -111,6 +111,7 @@ def allocate_tasks(
     for vehicle_id, uav in enumerate(config.uavs):
         route_stops: list[RouteStop] = []
         route_points: list[Point3D] = []
+        stop_path_indices: list[int] = []
         current_load = 0
         peak_load = 0
         route_distance = 0.0
@@ -131,16 +132,16 @@ def allocate_tasks(
                     load_after=current_load,
                 )
             )
+            if not route_points:
+                route_points.append(node.position)
+            stop_path_indices.append(len(route_points) - 1)
             if routing.IsEnd(index):
                 break
 
             next_index = solution.Value(routing.NextVar(index))
             next_node = nodes[manager.IndexToNode(next_index)]
             segment = paths.get(node.position, next_node.position)
-            if not route_points:
-                route_points.extend(segment.points)
-            else:
-                route_points.extend(segment.points[1:])
+            route_points.extend(segment.points[1:])
             route_distance += segment.distance
             index = next_index
 
@@ -151,6 +152,7 @@ def allocate_tasks(
                 uav=uav,
                 stops=route_stops,
                 path=route_points,
+                stop_path_indices=stop_path_indices,
                 distance=route_distance,
                 estimated_time=route_distance / uav.cruise_speed,
                 peak_load=peak_load,

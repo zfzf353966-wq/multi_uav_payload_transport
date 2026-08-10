@@ -39,18 +39,22 @@ ros2 run logistics_planner offboard_mission \
   --plan runs/traditional_baseline_ros/plan.json
 ```
 
-The baseline executor deliberately runs the three assigned routes one after
-another. This is the safe validation mode until space-time reservation and
-runtime vehicle separation are implemented. A package is reset to its planned
-pickup roof when the mission starts, follows its assigned UAV after pickup,
-and remains on the destination roof after delivery. Packages are visual-only
-in this phase, so their mass does not yet alter vehicle dynamics.
+The baseline executor runs all three assigned routes concurrently. A
+prioritized space-time reservation table covers staging waits, continuous
+flight, and a 12-second landing reservation. The three staging altitudes are
+3, 10.5, and 18 m, and the launch pads are 4 m apart. Runtime protection uses
+actual PX4 positions and projected relative motion to pause the shared virtual
+trajectory clock if separation is threatened. A package is reset to its
+planned pickup roof when the mission starts, follows its assigned UAV after
+pickup, and remains on the destination roof after delivery. Packages are
+visual-only in this phase, so their mass does not yet alter vehicle dynamics.
 
-PX4 receives position setpoints continuously at 10 Hz. Intermediate A* points
-are fly-through points; the vehicle only performs a position-and-speed settle
-at its final launch-pad point before commanding land. This is closed-loop
-position control using PX4's local-position estimate, but it is not yet a
-fully time-parameterized spline / minimum-snap trajectory.
+PX4 receives time-parameterized position, velocity, and acceleration setpoints
+at 10 Hz. A rounded, collision-checked path and curvature-aware speed profile
+limit stop-and-go motion and slow the UAV before bends. The vehicle only
+performs a position-and-speed settle at its final staging point before
+commanding land. This is closed-loop control using PX4's local-position
+estimate; minimum-snap optimization can be added as a later refinement.
 
 Run the headless integration check and exit automatically:
 

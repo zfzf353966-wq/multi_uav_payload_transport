@@ -5,6 +5,7 @@ from logistics_planner.config import load_world_config
 from logistics_planner.grid_planner import AStar3D, VoxelGrid
 from logistics_planner.path_oracle import PathOracle
 from logistics_planner.task_generator import generate_tasks
+from logistics_planner.trajectory import schedule_routes, trajectories_conflict
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -31,4 +32,19 @@ def test_assignment_and_paths_satisfy_constraints() -> None:
         grid.segment_is_free(first, second)
         for route in routes
         for first, second in zip(route.path, route.path[1:])
+    )
+
+    scheduled = schedule_routes(config, routes, grid)
+    assert all(
+        grid.segment_is_free(first.position, second.position)
+        for trajectory in scheduled
+        for first, second in zip(trajectory.samples, trajectory.samples[1:])
+    )
+    assert all(
+        not trajectories_conflict(first, second, config.planning.minimum_uav_separation)
+        for index, first in enumerate(scheduled)
+        for second in scheduled[index + 1 :]
+    )
+    assert max(item.start_delay + item.duration for item in scheduled) < sum(
+        item.duration for item in scheduled
     )

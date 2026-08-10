@@ -49,6 +49,7 @@ class VehicleRoute:
     uav: UAV
     stops: list[RouteStop]
     path: list[Point3D]
+    stop_path_indices: list[int]
     distance: float
     estimated_time: float
     peak_load: int
