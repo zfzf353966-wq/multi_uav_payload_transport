@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="delivery_package">
+    <static>true</static>
+    <link name="package_link">
+      <!-- Visual-only payload for the planning baseline. Physical payload dynamics
+           will be enabled after navigation and assignment are validated. -->
+      <visual name="box_visual">
+        <geometry><box><size>0.55 0.55 0.45</size></box></geometry>
+        <material><ambient>0.62 0.31 0.06 1</ambient><diffuse>0.88 0.48 0.10 1</diffuse></material>
+      </visual>
+      <visual name="tape_visual">
+        <pose>0 0 0.226 0 0 0</pose>
+        <geometry><box><size>0.12 0.56 0.012</size></box></geometry>
+        <material><ambient>0.95 0.85 0.25 1</ambient><diffuse>1 0.92 0.30 1</diffuse></material>
+      </visual>
+    </link>
+  </model>
+</sdf>

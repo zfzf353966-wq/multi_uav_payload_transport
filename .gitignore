@@ -1,0 +1,29 @@
+# ROS 2 / colcon outputs
+build/
+install/
+log/
+
+# Project-local Python environment and caches
+.venv/
+.vscode/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Training outputs
+checkpoints/
+runs/
+tensorboard/
+*.pt
+*.pth
+*.zip
+
+# Gazebo / runtime logs
+*.ulg
+*.log
+
+# Third-party ROS 2 source repositories are restored with vcstool from
+# dependencies.repos instead of being embedded as nested Git repositories.
+src/px4_msgs/
+src/px4_ros_com/

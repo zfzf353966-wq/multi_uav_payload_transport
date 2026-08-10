@@ -1,0 +1,14 @@
+# Reproducible Python environment for Ubuntu 22.04 / Python 3.10.
+# PyTorch is installed separately from the official CUDA 12.8 wheel index.
+torch==2.7.1
+numpy==1.26.4
+scipy==1.11.4
+gymnasium==1.2.1
+stable-baselines3==2.7.1
+tensorboard==2.20.0
+ortools==9.14.6206
+networkx==3.4.2
+# Matplotlib 3.5 is supplied by Ubuntu / ROS 2. Installing a second wheel here
+# conflicts with the system mpl_toolkits namespace package.
+pytest==8.3.5
+cffi==1.17.1

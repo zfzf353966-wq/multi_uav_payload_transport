@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+exec python -m logistics_planner.baseline "$@"

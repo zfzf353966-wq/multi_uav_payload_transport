@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>logistics_planner</name>
+  <version>0.1.0</version>
+  <description>Task allocation and 3D global planning for the multi-UAV logistics simulation.</description>
+  <maintainer email="gbc@example.com">gbc</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <test_depend>ament_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>
