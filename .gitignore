@@ -5,6 +5,7 @@ log/
 
 # Project-local Python environment and caches
 .venv/
+.deps/
 .vscode/
 __pycache__/
 *.py[cod]

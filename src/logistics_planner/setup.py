@@ -16,5 +16,11 @@ setup(
     maintainer_email="gbc@example.com",
     description="Known-map task allocation and 3D planning baseline.",
     license="Apache-2.0",
-    scripts=["scripts/traditional_baseline", "scripts/offboard_mission"],
+    scripts=[
+        "scripts/traditional_baseline",
+        "scripts/offboard_mission",
+        "scripts/lidar_tf_bridge",
+        "scripts/sector_observation",
+        "scripts/shadow_avoidance",
+    ],
 )

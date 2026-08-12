@@ -15,11 +15,13 @@ os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
 from gz.msgs10.boolean_pb2 import Boolean
 from gz.msgs10.pose_pb2 import Pose
 from gz.transport13 import Node as GazeboTransportNode
+from geometry_msgs.msg import Vector3Stamped
 import rclpy
 from px4_msgs.msg import (
     OffboardControlMode,
     TrajectorySetpoint,
     VehicleCommand,
+    VehicleAttitude,
     VehicleLocalPosition,
     VehicleStatus,
 )
@@ -41,6 +43,7 @@ class VehicleMission:
     trajectory_start_delay: float
     stops: list[dict]
     position: VehicleLocalPosition | None = None
+    attitude: VehicleAttitude | None = None
     status: VehicleStatus | None = None
     phase: str = "prestream"
     stop_index: int = 0
@@ -51,10 +54,15 @@ class VehicleMission:
     command_retries: int = 0
     prestream_announced: bool = False
     mode_command_sent: bool = False
+    mode_command_tick: int = 0
     arm_command_sent: bool = False
     hold_enu: Point3D | None = None
     landed: bool = False
     landing_commanded: bool = False
+    tracking_fault_ticks: int = 0
+    offboard_loss_ticks: int = 0
+    preflight_stable_ticks: int = 0
+    takeoff_ticks: int = 0
 
 
 class GazeboPackageManager:
@@ -106,16 +114,27 @@ class MultiUAVOffboard(Node):
         self.package_manager = GazeboPackageManager(plan["world"], plan, config_path)
         route_by_uav = {route["uav"]: route for route in plan["routes"]}
 
-        qos = QoSProfile(
+        command_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        # PX4 output writers are transient-local. Requesting the same durability
+        # here can replay VehicleStatus from a previous SITL run with the same
+        # namespace (for example stale nav_state=OFFBOARD). Telemetry must only
+        # contain live samples from the current PX4 processes.
+        telemetry_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
         self.missions: list[VehicleMission] = []
         self.publishers_by_namespace: dict[str, tuple] = {}
         for index, (uav, spawn) in enumerate(zip(config.uavs, config_raw_spawns(config_path))):
-            namespace = f"/px4_{index + 1}"
+            namespace_prefix = os.environ.get("MUPT_PX4_NAMESPACE_PREFIX", "mupt_px4_")
+            namespace = f"/{namespace_prefix}{index + 1}"
             staging = staging_position(spawn, index)
             route_data = route_by_uav[uav.id]
             if not route_data.get("trajectory"):
@@ -142,21 +161,43 @@ class MultiUAVOffboard(Node):
                 stops,
             )
             self.missions.append(mission)
-            mode_pub = self.create_publisher(OffboardControlMode, namespace + "/fmu/in/offboard_control_mode", qos)
-            setpoint_pub = self.create_publisher(TrajectorySetpoint, namespace + "/fmu/in/trajectory_setpoint", qos)
-            command_pub = self.create_publisher(VehicleCommand, namespace + "/fmu/in/vehicle_command", qos)
-            self.publishers_by_namespace[namespace] = (mode_pub, setpoint_pub, command_pub)
+            mode_pub = self.create_publisher(
+                OffboardControlMode, namespace + "/fmu/in/offboard_control_mode", command_qos
+            )
+            setpoint_pub = self.create_publisher(
+                TrajectorySetpoint, namespace + "/fmu/in/trajectory_setpoint", command_qos
+            )
+            command_pub = self.create_publisher(
+                VehicleCommand, namespace + "/fmu/in/vehicle_command", command_qos
+            )
+            desired_body_pub = self.create_publisher(
+                Vector3Stamped,
+                f"/mupt/uav_{index + 1}/planner/desired_velocity_body",
+                5,
+            )
+            self.publishers_by_namespace[namespace] = (
+                mode_pub,
+                setpoint_pub,
+                command_pub,
+                desired_body_pub,
+            )
             self.create_subscription(
                 VehicleLocalPosition,
                 namespace + "/fmu/out/vehicle_local_position_v1",
                 lambda message, vehicle=mission: setattr(vehicle, "position", message),
-                qos,
+                telemetry_qos,
+            )
+            self.create_subscription(
+                VehicleAttitude,
+                namespace + "/fmu/out/vehicle_attitude",
+                lambda message, vehicle=mission: setattr(vehicle, "attitude", message),
+                telemetry_qos,
             )
             self.create_subscription(
                 VehicleStatus,
                 namespace + "/fmu/out/vehicle_status_v1",
                 lambda message, vehicle=mission: setattr(vehicle, "status", message),
-                qos,
+                telemetry_qos,
             )
 
         self.schedule_epoch: float | None = None
@@ -165,6 +206,9 @@ class MultiUAVOffboard(Node):
         self.minimum_actual_separation = math.inf
         self.maximum_concurrent_airborne = 0
         self.safety_hold_ticks = 0
+        self.abort_reason: str | None = None
+        self.preflight_gate_open = False
+        self.preflight_started = time.monotonic()
         self.timer = self.create_timer(0.1, self._tick)
 
     @property
@@ -173,7 +217,12 @@ class MultiUAVOffboard(Node):
 
     @property
     def ready(self) -> bool:
-        return all(mission.position is not None and mission.status is not None for mission in self.missions)
+        return all(
+            mission.position is not None
+            and mission.attitude is not None
+            and mission.status is not None
+            for mission in self.missions
+        )
 
     def _tick(self) -> None:
         now = time.monotonic()
@@ -197,8 +246,45 @@ class MultiUAVOffboard(Node):
             if mission.position is None or mission.status is None:
                 continue
             self._update_package_state(mission)
+            if (
+                mission.phase in ("takeoff", "staged", "tracking")
+                and mission.status.failure_detector_status != VehicleStatus.FAILURE_NONE
+            ):
+                self._abort_all(
+                    f"{mission.namespace} PX4 failure detector status="
+                    f"{mission.status.failure_detector_status}"
+                )
+                return
+            if mission.phase in ("takeoff", "staged", "tracking"):
+                if mission.status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
+                    mission.offboard_loss_ticks = 0
+                else:
+                    mission.offboard_loss_ticks += 1
+                    if mission.offboard_loss_ticks >= 10:
+                        self._abort_all(
+                            f"{mission.namespace} left Offboard mode for at least 1.0 s"
+                        )
+                        return
             if mission.phase == "prestream":
                 self._publish_position_target(mission, mission.staging_enu)
+                if not self.preflight_gate_open:
+                    if self._preflight_stable(mission):
+                        mission.preflight_stable_ticks += 1
+                    else:
+                        mission.preflight_stable_ticks = 0
+                        mission.warmup_ticks = 0
+                    if all(item.preflight_stable_ticks >= 30 for item in self.missions):
+                        self.preflight_gate_open = True
+                        self.get_logger().info(
+                            "all UAV estimates stable for 3.0 s; preflight gate latched open"
+                        )
+                    elif now - self.preflight_started >= 60.0:
+                        waiting = ", ".join(
+                            f"{item.namespace}={item.preflight_stable_ticks / 10.0:.1f}s"
+                            for item in self.missions
+                        )
+                        self._abort_all(f"preflight estimates did not stabilize within 60 s ({waiting})")
+                        return
                 self._handle_offboard_entry(mission)
                 if (
                     mission.status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
@@ -208,6 +294,10 @@ class MultiUAVOffboard(Node):
                 continue
 
             if mission.phase == "takeoff":
+                mission.takeoff_ticks += 1
+                if mission.takeoff_ticks >= 300:
+                    self._abort_all(f"{mission.namespace} did not reach its staging point within 30 s")
+                    return
                 self._publish_position_target(mission, mission.staging_enu)
                 if self._settled_at(mission, mission.staging_enu, radius=0.6, maximum_speed=0.6):
                     mission.phase = "staged"
@@ -247,12 +337,21 @@ class MultiUAVOffboard(Node):
             # catch the moving reference instead of letting it run away.
             if must_hold:
                 pause_schedule = True
+                mission.tracking_fault_ticks = 0
                 mission.hold_enu = mission.hold_enu or actual_enu
                 self._publish_position_target(mission, mission.hold_enu)
                 continue
             mission.hold_enu = None
             if tracking_error > 2.0:
                 pause_schedule = True
+                mission.tracking_fault_ticks += 1
+                if mission.tracking_fault_ticks >= 300:
+                    self._abort_all(
+                        f"{mission.namespace} tracking error stayed above 2.0 m for 30 s"
+                    )
+                    return
+            else:
+                mission.tracking_fault_ticks = 0
             self._publish_trajectory_target(mission, desired)
 
             if elapsed < mission.trajectory[-1].time:
@@ -268,7 +367,7 @@ class MultiUAVOffboard(Node):
             self._vehicle_command(mission, VehicleCommand.VEHICLE_CMD_NAV_LAND)
             self.get_logger().info(f"{mission.namespace}: trajectory complete, landing")
 
-        if self.schedule_epoch is None and all(
+        if self.abort_reason is None and self.schedule_epoch is None and all(
             mission.phase in ("staged", "tracking", "landing") or mission.landed
             for mission in self.missions
         ):
@@ -282,7 +381,30 @@ class MultiUAVOffboard(Node):
             # when any vehicle needs extra time to catch its reference.
             self.schedule_time_shift += schedule_tick_duration
 
+    def _abort_all(self, reason: str) -> None:
+        """Land the fleet instead of allowing an unrecoverable shared-clock stall."""
+        if self.abort_reason is not None:
+            return
+        self.abort_reason = reason
+        self.get_logger().error(f"mission abort: {reason}; commanding all UAVs to land")
+        for mission in self.missions:
+            if mission.landed:
+                continue
+            if mission.status and mission.status.arming_state == VehicleStatus.ARMING_STATE_DISARMED:
+                mission.landed = True
+                mission.phase = "aborted"
+                continue
+            mission.landing_commanded = True
+            mission.phase = "landing"
+            mission.command_retries = 0
+            self._vehicle_command(mission, VehicleCommand.VEHICLE_CMD_NAV_LAND)
+
     def _handle_offboard_entry(self, mission: VehicleMission) -> None:
+        # All vehicles must be motionless with valid estimates for three
+        # continuous seconds. This avoids force-arming while Gazebo/PX4 sensor
+        # initialization is still settling on a busy desktop.
+        if not self.preflight_gate_open:
+            return
         mission.warmup_ticks += 1
         if not mission.prestream_announced:
             mission.prestream_announced = True
@@ -293,8 +415,9 @@ class MultiUAVOffboard(Node):
         # commands together can briefly arm in the previous mode and let
         # the no-RC failsafe select RTL before Offboard becomes active.
         offboard_active = mission.status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
-        should_request_mode = mission.warmup_ticks >= 20 and not offboard_active and (
-            not mission.mode_command_sent or mission.warmup_ticks % 20 == 0
+        should_request_mode = mission.warmup_ticks >= 20 and (
+            not mission.mode_command_sent
+            or (not offboard_active and mission.warmup_ticks % 20 == 0)
         )
         if should_request_mode:
             self._vehicle_command(
@@ -305,10 +428,15 @@ class MultiUAVOffboard(Node):
             )
             if not mission.mode_command_sent:
                 mission.mode_command_sent = True
+                mission.mode_command_tick = mission.warmup_ticks
                 self.get_logger().info(f"{mission.namespace}: Offboard mode requested")
 
-        should_arm = offboard_active and mission.status.arming_state == VehicleStatus.ARMING_STATE_DISARMED and (
-            not mission.arm_command_sent or mission.warmup_ticks % 20 == 0
+        should_arm = (
+            mission.mode_command_sent
+            and mission.warmup_ticks >= mission.mode_command_tick + 5
+            and offboard_active
+            and mission.status.arming_state == VehicleStatus.ARMING_STATE_DISARMED
+            and (not mission.arm_command_sent or mission.warmup_ticks % 20 == 0)
         )
         if should_arm:
             self._vehicle_command(
@@ -322,6 +450,26 @@ class MultiUAVOffboard(Node):
             if not mission.arm_command_sent:
                 mission.arm_command_sent = True
                 self.get_logger().info(f"{mission.namespace}: Offboard confirmed; arm requested")
+
+    @staticmethod
+    def _preflight_stable(mission: VehicleMission) -> bool:
+        if mission.position is None or mission.attitude is None or mission.status is None:
+            return False
+        position = mission.position
+        status = mission.status
+        if (
+            status.arming_state != VehicleStatus.ARMING_STATE_DISARMED
+            or status.failsafe
+            or status.failure_detector_status != VehicleStatus.FAILURE_NONE
+            or not all((position.xy_valid, position.z_valid, position.v_xy_valid, position.v_z_valid))
+        ):
+            return False
+        values = (position.x, position.y, position.z, position.vx, position.vy, position.vz)
+        if not all(math.isfinite(value) for value in values):
+            return False
+        speed = math.sqrt(position.vx**2 + position.vy**2 + position.vz**2)
+        roll, pitch = quaternion_roll_pitch(tuple(mission.attitude.q))
+        return speed <= 0.20 and abs(roll) <= math.radians(5.0) and abs(pitch) <= math.radians(5.0)
 
 
     def _settled_at(
@@ -457,6 +605,23 @@ class MultiUAVOffboard(Node):
         message.yaw = math.nan
         message.yawspeed = math.nan
         self.publishers_by_namespace[mission.namespace][1].publish(message)
+        desired_ned = velocity_ned
+        if not all(math.isfinite(value) for value in desired_ned) and mission.position is not None:
+            current = (mission.position.x, mission.position.y, mission.position.z)
+            error = tuple(target_ned[axis] - current[axis] for axis in range(3))
+            norm = math.sqrt(sum(value * value for value in error))
+            desired_ned = (
+                tuple(value * min(2.0 / norm, 1.0) for value in error)
+                if norm > 1e-6
+                else (0.0, 0.0, 0.0)
+            )
+        if mission.position is not None and all(math.isfinite(value) for value in desired_ned):
+            body = ned_vector_to_body_flu(desired_ned, mission.position.heading)
+            advisory = Vector3Stamped()
+            advisory.header.stamp = self.get_clock().now().to_msg()
+            advisory.header.frame_id = f"uav_{mission.system_id - 1}/lidar_link"
+            advisory.vector.x, advisory.vector.y, advisory.vector.z = body
+            self.publishers_by_namespace[mission.namespace][3].publish(advisory)
 
     def _vehicle_command(self, mission: VehicleMission, command: int, **parameters: float) -> None:
         message = VehicleCommand()
@@ -528,6 +693,24 @@ def ned_vector_to_enu(vector: Point3D) -> Point3D:
     return (vector[1], vector[0], -vector[2])
 
 
+def ned_vector_to_body_flu(vector: Point3D, heading: float) -> Point3D:
+    north, east, down = vector
+    cosine, sine = math.cos(heading), math.sin(heading)
+    return (
+        north * cosine + east * sine,
+        north * sine - east * cosine,
+        -down,
+    )
+
+
+def quaternion_roll_pitch(quaternion: tuple[float, float, float, float]) -> tuple[float, float]:
+    """Return FRD-to-NED roll and pitch from a PX4 wxyz quaternion."""
+    w, x, y, z = quaternion
+    roll = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+    pitch_sine = max(-1.0, min(1.0, 2.0 * (w * y - z * x)))
+    return roll, math.asin(pitch_sine)
+
+
 def main() -> None:
     root = Path(os.environ.get("MUPT_ROOT", Path.cwd()))
     parser = argparse.ArgumentParser(description="Execute a traditional plan on three PX4 SITL vehicles")
@@ -550,6 +733,8 @@ def main() -> None:
             rclpy.spin_once(node, timeout_sec=0.2)
         if not node.complete:
             raise TimeoutError("Offboard mission did not complete before the timeout")
+        if node.abort_reason is not None:
+            raise RuntimeError(f"Offboard mission aborted safely: {node.abort_reason}")
         print(
             "PASS: all three PX4 missions completed and landed; "
             f"max_concurrent={node.maximum_concurrent_airborne}, "

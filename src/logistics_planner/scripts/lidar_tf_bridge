@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+from logistics_planner.lidar_tf_bridge import main
+
+main()

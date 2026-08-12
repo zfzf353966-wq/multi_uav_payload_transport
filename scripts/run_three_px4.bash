@@ -13,6 +13,11 @@ RUN_DIR="${MUPT_ROOT}/log/three_px4"
 HEADLESS_MODE="${HEADLESS:-0}"
 WORLD_NAME="${PX4_GZ_WORLD:-logistics_city}"
 VEHICLE_MODEL="${PX4_SIM_MODEL:-gz_x500}"
+ROS_NAMESPACE_PREFIX="${MUPT_PX4_NAMESPACE_PREFIX:-mupt_px4_}"
+LOCAL_XRCE_INSTALL="${MUPT_ROOT}/.deps/micro_xrce_agent_v2.4.2/install"
+LOCAL_XRCE_AGENT="${LOCAL_XRCE_INSTALL}/bin/MicroXRCEAgent"
+LOCAL_XRCE_LIB="${LOCAL_XRCE_INSTALL}/lib"
+XRCE_AGENT_BIN="${MICRO_XRCE_AGENT_BIN:-${LOCAL_XRCE_AGENT}}"
 SELF_TEST=0
 
 case "${1:-}" in
@@ -38,6 +43,12 @@ for required in "${PX4_BIN}" "${PX4_ETC}" "${GZ_ENV}"; do
     exit 1
   fi
 done
+
+if [[ ! -x "${XRCE_AGENT_BIN}" ]]; then
+  echo "Missing ROS 2 Humble-compatible Micro XRCE-DDS Agent v2.4.2: ${XRCE_AGENT_BIN}" >&2
+  echo "Run: scripts/install_xrce_agent.bash" >&2
+  exit 1
+fi
 
 mkdir -p "${RUN_DIR}"
 set +u
@@ -85,6 +96,12 @@ start_px4() {
   local standalone="$3"
   local work_dir="${RUN_DIR}/instance_${instance}"
   mkdir -p "${work_dir}"
+  # SITL state is disposable. Reusing estimator/calibration values learned
+  # during a previous crash can make the next takeoff non-deterministic.
+  rm -f \
+    "${work_dir}/parameters.bson" \
+    "${work_dir}/parameters_backup.bson" \
+    "${work_dir}/dataman"
 
   local -a px4_env=(env)
   if [[ "${HEADLESS_MODE}" == "0" ]]; then
@@ -96,11 +113,15 @@ start_px4() {
     "PX4_PARAM_SDLOG_MODE=0"
     "PX4_PARAM_SDLOG_BACKEND=0"
     "PX4_PARAM_NAV_DLL_ACT=0"
+    # There is intentionally no QGroundControl heartbeat in this ROS 2-only
+    # SITL workflow. Ignore GCS datalink loss while Offboard is active (bit 2).
+    "PX4_PARAM_COM_DLL_EXCEPT=4"
     # This SITL workflow intentionally has no RC transmitter. Ignore RC loss
     # only in Offboard (bit 2); Offboard-link-loss protection remains active.
     "PX4_PARAM_COM_RCL_EXCEPT=4"
     "PX4_PARAM_COM_RC_IN_MODE=4"
     "PX4_SIM_MODEL=${VEHICLE_MODEL}"
+    "PX4_UXRCE_DDS_NS=${ROS_NAMESPACE_PREFIX}${instance}"
     "PX4_GZ_MODEL_POSE=${pose}"
     "PX4_GZ_WORLD=${WORLD_NAME}"
     "PX4_GZ_WORLDS=${MUPT_SIMULATION_DIR}/worlds"
@@ -125,7 +146,7 @@ check_ros_topics() {
   while (( SECONDS < deadline )); do
     all_ready=1
     for instance in 1 2 3; do
-      topic="/px4_${instance}/fmu/out/vehicle_status_v1"
+      topic="/${ROS_NAMESPACE_PREFIX}${instance}/fmu/out/vehicle_status_v1"
       if ! ros2 topic list 2>/dev/null | grep -Fxq "${topic}"; then
         all_ready=0
         break
@@ -141,7 +162,7 @@ check_ros_topics() {
   fi
 
   for instance in 1 2 3; do
-    topic="/px4_${instance}/fmu/out/vehicle_status_v1"
+    topic="/${ROS_NAMESPACE_PREFIX}${instance}/fmu/out/vehicle_status_v1"
     echo "Checking ${topic}..."
     timeout 12s ros2 topic echo --once "${topic}" px4_msgs/msg/VehicleStatus \
       >/dev/null
@@ -150,7 +171,9 @@ check_ros_topics() {
 }
 
 echo "Starting Micro XRCE-DDS Agent..."
-start_group "${RUN_DIR}/micro_xrce_agent.log" MicroXRCEAgent udp4 -p 8888
+start_group "${RUN_DIR}/micro_xrce_agent.log" env \
+  "LD_LIBRARY_PATH=${LOCAL_XRCE_LIB}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
+  "${XRCE_AGENT_BIN}" udp4 -p 8888
 sleep 1
 
 echo "Starting PX4 instance 1 and Gazebo Harmonic..."
@@ -169,7 +192,7 @@ if [[ "${HEADLESS_MODE}" == "0" ]]; then
 else
   echo "Gazebo GUI: disabled (headless)"
 fi
-echo "ROS namespaces: /px4_1, /px4_2, /px4_3"
+echo "ROS namespaces: /${ROS_NAMESPACE_PREFIX}1, /${ROS_NAMESPACE_PREFIX}2, /${ROS_NAMESPACE_PREFIX}3"
 echo "Logs: ${RUN_DIR}"
 
 if (( SELF_TEST == 1 )); then
