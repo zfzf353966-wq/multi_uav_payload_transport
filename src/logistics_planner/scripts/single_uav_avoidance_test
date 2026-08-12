@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+from logistics_planner.single_uav_avoidance_test import main
+
+main()

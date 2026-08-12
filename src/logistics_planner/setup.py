@@ -22,5 +22,6 @@ setup(
         "scripts/lidar_tf_bridge",
         "scripts/sector_observation",
         "scripts/shadow_avoidance",
+        "scripts/single_uav_avoidance_test",
     ],
 )

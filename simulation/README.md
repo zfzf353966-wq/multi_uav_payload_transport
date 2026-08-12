@@ -145,3 +145,38 @@ The vector frame is forward-left-up. `CLEAR` means no relevant obstacle is
 within 6 m. `AVOID_*` and `EMERGENCY_*` report the suggested direction and the
 nearest relevant distance. This node is a communication and rule-baseline
 check before local avoidance is allowed to modify the real flight setpoint.
+
+## Single-UAV closed-loop avoidance test
+
+The isolated test promotes the advisory velocity to a real PX4 velocity
+setpoint for UAV 1 only. UAV 2 and UAV 3 remain disarmed. The wrapper creates a
+temporary red sphere at `(-20, -23, 6)` directly on a low-speed test corridor,
+then removes it automatically when the test exits. Do not run
+`offboard_mission` at the same time because two nodes must never command the
+same PX4 instance.
+
+Start the simulation and lidar stack in two terminals:
+
+```bash
+scripts/run_three_px4.bash --gui
+```
+
+```bash
+scripts/run_lidar_rviz.bash
+```
+
+Run the isolated controller in a third terminal:
+
+```bash
+scripts/run_single_avoidance_test.bash
+```
+
+The controller uses a 1.4 m/s nominal speed and a 2.0 m/s hard command limit.
+It aborts and lands on stale avoidance data, PX4 failure, Offboard loss,
+geofence violation, or timeout. Success requires the vehicle to pass the
+obstacle, produce a measurable lateral detour, return to the launch area, land,
+and disarm. The final line is similar to:
+
+```text
+PASS: UAV 1 closed-loop avoidance completed; avoidance_ticks=..., minimum_scan=... m, lateral_detour=... m
+```
