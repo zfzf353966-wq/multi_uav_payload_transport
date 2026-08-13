@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import math
 import time
+from dataclasses import dataclass
 from typing import Sequence
 
 import rclpy
@@ -86,12 +87,79 @@ def body_flu_to_ned(vector: Sequence[float], heading: float) -> Point3D:
     )
 
 
+@dataclass(frozen=True)
+class ArbitrationResult:
+    velocity_body: Point3D
+    source: str
+    reason: str
+
+
+def directional_clearance(sectors: Sequence[float], velocity_body: Sequence[float]) -> float:
+    """Return the closest 3x12 sector distance along a body-FLU velocity."""
+    if len(sectors) != 36:
+        return 0.0
+    forward, left, up = map(float, velocity_body)
+    speed = math.sqrt(forward * forward + left * left + up * up)
+    if speed < 0.05:
+        return math.inf
+    azimuth = math.atan2(left, forward)
+    sector = int(round(azimuth / (2.0 * math.pi / 12.0))) % 12
+    elevation = math.atan2(up, math.hypot(forward, left))
+    layer = min(range(3), key=lambda index: abs(elevation - math.radians((-12.0, 0.0, 12.0)[index])))
+    candidates = []
+    for layer_index in range(max(0, layer - 1), min(3, layer + 2)):
+        for offset in (-1, 0, 1):
+            value = float(sectors[layer_index * 12 + (sector + offset) % 12])
+            if math.isfinite(value):
+                candidates.append(value)
+    return min(candidates, default=0.0)
+
+
+def arbitrate_velocity(
+    *,
+    requested_source: str,
+    rl_velocity: Sequence[float] | None,
+    rl_age: float,
+    fallback_velocity: Sequence[float],
+    sectors: Sequence[float],
+    maximum_speed: float = 2.0,
+    emergency_distance: float = 2.2,
+) -> ArbitrationResult:
+    """Select PPO only inside a conservative envelope, otherwise fall back."""
+    fallback = limit_vector(fallback_velocity, maximum_speed)
+    if requested_source != "rl":
+        return ArbitrationResult(fallback, "potential", "configured")
+    if rl_velocity is None or rl_age > 0.5:
+        return ArbitrationResult(fallback, "fallback", "rl_stale")
+    values = tuple(float(value) for value in rl_velocity)
+    if len(values) != 3 or not all(math.isfinite(value) for value in values):
+        return ArbitrationResult(fallback, "fallback", "rl_invalid")
+    finite_sectors = [float(value) for value in sectors if math.isfinite(value)]
+    if len(sectors) != 36 or not finite_sectors:
+        return ArbitrationResult(fallback, "fallback", "scan_invalid")
+    if min(finite_sectors) <= emergency_distance:
+        return ArbitrationResult(fallback, "fallback", "emergency_clearance")
+    candidate = limit_vector(values, maximum_speed)
+    speed = math.sqrt(sum(value * value for value in candidate))
+    required_clearance = 1.2 + speed * speed / 3.0
+    if directional_clearance(sectors, candidate) < required_clearance:
+        return ArbitrationResult(fallback, "fallback", "direction_blocked")
+    return ArbitrationResult(candidate, "rl", "accepted")
+
+
 class SingleUAVAvoidanceTest(Node):
     """Closed-loop lidar avoidance test that commands only PX4 vehicle one."""
 
-    def __init__(self, namespace: str = "/mupt_px4_1") -> None:
+    def __init__(
+        self,
+        namespace: str = "/mupt_px4_1",
+        test_label: str = "static",
+        avoidance_source: str = "potential",
+    ) -> None:
         super().__init__("single_uav_closed_loop_avoidance_test")
         self.namespace = namespace.rstrip("/")
+        self.test_label = test_label
+        self.avoidance_source = avoidance_source
         self.system_id = 2
 
         command_qos = QoSProfile(
@@ -124,6 +192,12 @@ class SingleUAVAvoidanceTest(Node):
         )
         self.desired_publisher = self.create_publisher(
             Vector3Stamped, "/mupt/uav_1/planner/desired_velocity_body", sensor_qos
+        )
+        self.relative_goal_publisher = self.create_publisher(
+            Vector3Stamped, "/mupt/uav_1/planner/relative_goal_body", sensor_qos
+        )
+        self.arbiter_publisher = self.create_publisher(
+            String, "/mupt/uav_1/controller/arbiter", sensor_qos
         )
         self.create_subscription(
             VehicleLocalPosition,
@@ -161,12 +235,21 @@ class SingleUAVAvoidanceTest(Node):
             self._sectors_callback,
             sensor_qos,
         )
+        self.create_subscription(
+            Vector3Stamped,
+            "/mupt/uav_1/rl_shadow/suggested_velocity_body",
+            self._rl_suggestion_callback,
+            sensor_qos,
+        )
 
         self.position: VehicleLocalPosition | None = None
         self.attitude: VehicleAttitude | None = None
         self.status: VehicleStatus | None = None
         self.suggested_body: Point3D | None = None
         self.suggestion_time = 0.0
+        self.rl_suggested_body: Point3D | None = None
+        self.rl_suggestion_time = 0.0
+        self.latest_sectors: tuple[float, ...] = tuple([20.0] * 36)
         self.action = ""
         self.action_time = 0.0
         self.phase = "prestream"
@@ -181,6 +264,10 @@ class SingleUAVAvoidanceTest(Node):
         self.command_ticks = 0
         self.outbound_complete = False
         self.avoidance_ticks = 0
+        self.rl_control_ticks = 0
+        self.fallback_ticks = 0
+        self.traditional_ticks = 0
+        self.last_arbiter_state = ""
         self.minimum_distance = math.inf
         self.maximum_lateral_deviation = 0.0
         self.abort_reason: str | None = None
@@ -188,7 +275,8 @@ class SingleUAVAvoidanceTest(Node):
         self.success = False
         self.timer = self.create_timer(0.1, self._tick)
         self.get_logger().info(
-            f"closed-loop test bound exclusively to {self.namespace}; UAV 2 and UAV 3 remain disarmed"
+            f"closed-loop test bound exclusively to {self.namespace}; "
+            f"source={self.avoidance_source}; UAV 2 and UAV 3 remain disarmed"
         )
 
     def _position_callback(self, message: VehicleLocalPosition) -> None:
@@ -210,7 +298,15 @@ class SingleUAVAvoidanceTest(Node):
         self.action = message.data
         self.action_time = time.monotonic()
 
+    def _rl_suggestion_callback(self, message: Vector3Stamped) -> None:
+        values = (message.vector.x, message.vector.y, message.vector.z)
+        if all(math.isfinite(value) for value in values):
+            self.rl_suggested_body = values
+            self.rl_suggestion_time = time.monotonic()
+
     def _sectors_callback(self, message: Float32MultiArray) -> None:
+        if len(message.data) == 36 and all(math.isfinite(value) for value in message.data):
+            self.latest_sectors = tuple(float(value) for value in message.data)
         finite = [float(value) for value in message.data if math.isfinite(value) and value > 0.05]
         if finite:
             self.minimum_distance = min(self.minimum_distance, min(finite))
@@ -320,17 +416,53 @@ class SingleUAVAvoidanceTest(Node):
         heading = self.position.heading if math.isfinite(self.position.heading) else 0.0
         desired_body = ned_vector_to_body_flu(desired_ned, heading)
         self._publish_desired_body(desired_body)
+        relative_enu = tuple(target[index] - current[index] for index in range(3))
+        relative_ned = (relative_enu[1], relative_enu[0], -relative_enu[2])
+        self._publish_relative_goal_body(ned_vector_to_body_flu(relative_ned, heading))
 
         now = time.monotonic()
         if self.suggested_body is None or now - self.suggestion_time > 0.5:
             if now - self.phase_started > 1.5:
                 self._abort("avoidance suggestion became stale for more than 0.5 s")
                 return
-            command_ned = desired_ned
+            potential_body = desired_body
         else:
-            command_ned = body_flu_to_ned(self.suggested_body, heading)
+            potential_body = self.suggested_body
             if now - self.action_time <= 0.5 and self.action and not self.action.startswith("CLEAR"):
                 self.avoidance_ticks += 1
+
+        decision = arbitrate_velocity(
+            # The current policy was trained with the goal in the forward
+            # hemisphere. Use it on the obstacle-crossing outbound leg only;
+            # the return leg remains under the proven traditional controller.
+            requested_source=(
+                self.avoidance_source
+                if self.phase == "outbound"
+                else "potential"
+            ),
+            rl_velocity=self.rl_suggested_body,
+            rl_age=now - self.rl_suggestion_time,
+            fallback_velocity=potential_body,
+            sectors=self.latest_sectors,
+        )
+        command_ned = body_flu_to_ned(decision.velocity_body, heading)
+        if decision.source == "rl":
+            self.rl_control_ticks += 1
+        elif decision.source == "fallback":
+            self.fallback_ticks += 1
+        elif decision.source == "potential":
+            self.traditional_ticks += 1
+        arbiter_state = f"{decision.source}:{decision.reason}"
+        arbiter_message = String()
+        arbiter_message.data = (
+            f"source={decision.source} reason={decision.reason} "
+            f"rl_ticks={self.rl_control_ticks} fallback_ticks={self.fallback_ticks} "
+            f"traditional_ticks={self.traditional_ticks}"
+        )
+        self.arbiter_publisher.publish(arbiter_message)
+        if arbiter_state != self.last_arbiter_state:
+            self.get_logger().info(f"arbiter {arbiter_message.data}")
+            self.last_arbiter_state = arbiter_state
 
         command_ned = limit_vector(command_ned, 2.0)
         # Never allow an avoidance correction to turn into an uncontrolled
@@ -353,6 +485,8 @@ class SingleUAVAvoidanceTest(Node):
             failures.append("avoidance did not activate for at least five control ticks")
         if self.maximum_lateral_deviation < 0.25:
             failures.append("no measurable lateral detour was produced")
+        if self.avoidance_source == "rl" and self.rl_control_ticks < 20:
+            failures.append("PPO was not accepted for at least twenty control ticks")
         if failures:
             self.abort_reason = "; ".join(failures)
         self._command_land()
@@ -380,10 +514,12 @@ class SingleUAVAvoidanceTest(Node):
             self.complete = True
             if self.success:
                 self.get_logger().info(
-                    "PASS: UAV 1 closed-loop avoidance completed; "
+                    f"PASS: UAV 1 {self.test_label} closed-loop avoidance completed; "
                     f"avoidance_ticks={self.avoidance_ticks}, "
                     f"minimum_scan={self.minimum_distance:.2f} m, "
-                    f"lateral_detour={self.maximum_lateral_deviation:.2f} m"
+                    f"lateral_detour={self.maximum_lateral_deviation:.2f} m, "
+                    f"rl_ticks={self.rl_control_ticks}, fallback_ticks={self.fallback_ticks}, "
+                    f"traditional_ticks={self.traditional_ticks}"
                 )
             else:
                 self.get_logger().error(f"FAIL: {self.abort_reason}")
@@ -478,6 +614,13 @@ class SingleUAVAvoidanceTest(Node):
         message.vector.x, message.vector.y, message.vector.z = velocity_body
         self.desired_publisher.publish(message)
 
+    def _publish_relative_goal_body(self, relative_goal_body: Point3D) -> None:
+        message = Vector3Stamped()
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.header.frame_id = "uav_1/lidar_link"
+        message.vector.x, message.vector.y, message.vector.z = relative_goal_body
+        self.relative_goal_publisher.publish(message)
+
     def _vehicle_command(self, command: int, **parameters: float) -> None:
         message = VehicleCommand()
         message.timestamp = self._timestamp()
@@ -514,10 +657,14 @@ class SingleUAVAvoidanceTest(Node):
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a closed-loop lidar avoidance test on UAV 1")
     parser.add_argument("--namespace", default="/mupt_px4_1")
+    parser.add_argument("--test-label", default="static", choices=("static", "dynamic", "rl_dynamic"))
+    parser.add_argument("--avoidance-source", default="potential", choices=("potential", "rl"))
     parser.add_argument("--timeout", type=float, default=190.0)
     arguments = parser.parse_args()
     rclpy.init()
-    node = SingleUAVAvoidanceTest(arguments.namespace)
+    node = SingleUAVAvoidanceTest(
+        arguments.namespace, arguments.test_label, arguments.avoidance_source
+    )
     deadline = time.monotonic() + arguments.timeout
     try:
         while rclpy.ok() and not node.complete and time.monotonic() < deadline:

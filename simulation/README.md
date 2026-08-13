@@ -178,5 +178,133 @@ obstacle, produce a measurable lateral detour, return to the launch area, land,
 and disarm. The final line is similar to:
 
 ```text
-PASS: UAV 1 closed-loop avoidance completed; avoidance_ticks=..., minimum_scan=... m, lateral_detour=... m
+PASS: UAV 1 static closed-loop avoidance completed; avoidance_ticks=..., minimum_scan=... m, lateral_detour=... m
 ```
+
+### Moving-obstacle closed-loop test
+
+After the static test passes, keep the same simulation and lidar terminals
+running and use the dynamic wrapper instead:
+
+```bash
+scripts/run_single_dynamic_avoidance_test.bash
+```
+
+This creates a 0.75 m radius red sphere whose centre follows a 2.5 m circular
+orbit at about 0.88 m/s. The orbit is centred at `(-20, -23, 6)` and repeatedly
+crosses UAV 1's nominal route. The temporary model is removed automatically.
+A successful run ends with:
+
+```text
+PASS: UAV 1 dynamic closed-loop avoidance completed; avoidance_ticks=..., minimum_scan=... m, lateral_detour=... m
+```
+
+## Lightweight reinforcement-learning environment
+
+`UAVLocalAvoidanceEnv` is a fast Gymnasium environment used before expensive
+Gazebo/PX4 training. Its 42-value observation contains the normalized 3x12
+lidar sectors, relative goal position, and vehicle velocity. The three
+continuous actions are bounded forward-left-up velocity corrections. Moving
+spheres are randomized at every reset, and rewards cover goal progress,
+clearance, smooth control, collision, geofence exit, and successful arrival.
+
+Run a short end-to-end PPO smoke test without starting ROS or Gazebo:
+
+```bash
+scripts/train_rl_avoidance.bash \
+  --timesteps 4096 \
+  --eval-episodes 30 \
+  --output-dir runs/rl_avoidance_smoke
+```
+
+The command saves `ppo_local_avoidance.zip`, TensorBoard data, and
+`metrics.json`. Metrics always compare the trained policy against the
+zero-correction nominal controller on identical episode seeds. A smoke run
+only validates sampling, optimization, serialization, and evaluation; it is
+not accepted as a deployable policy unless it improves collision and success
+rates over the nominal baseline on a much larger evaluation set.
+
+After the smoke test, run the first meaningful training gate with parallel CPU
+environments and a fixed 200-episode holdout set:
+
+```bash
+scripts/train_rl_avoidance.bash \
+  --timesteps 100000 \
+  --eval-episodes 200 \
+  --n-envs 8 \
+  --output-dir runs/rl_avoidance_100k
+```
+
+The evaluation reports success, collision, geofence-exit, and timeout rates.
+Passing this lightweight gate only permits a policy to enter advisory Gazebo
+inference. It must still pass Gazebo shadow comparison and the existing
+single-UAV safety controller before it is allowed to command PX4.
+
+### PPO shadow inference in Gazebo
+
+The trained policy can consume live Gazebo observations at 10 Hz without
+writing any PX4 input topic. Start the normal simulation, lidar stack, and PPO
+shadow process in separate terminals:
+
+```bash
+scripts/run_three_px4.bash --gui
+```
+
+```bash
+scripts/run_lidar_rviz.bash
+```
+
+```bash
+scripts/run_rl_shadow.bash
+```
+
+Then start the existing dynamic test in a fourth terminal. The artificial
+potential-field controller remains responsible for the actual flight; PPO is
+advisory only:
+
+```bash
+scripts/run_single_dynamic_avoidance_test.bash
+```
+
+Inspect PPO frequency and one diagnostic sample with:
+
+```bash
+ros2 topic hz /mupt/uav_1/rl_shadow/suggested_velocity_body
+ros2 topic echo --once /mupt/uav_1/rl_shadow/status \
+  std_msgs/msg/String --qos-reliability best_effort
+```
+
+The expected frequency is about 10 Hz. Available outputs are
+`action_normalized`, `correction_body`, `suggested_velocity_body`, and
+`status` below `/mupt/uav_1/rl_shadow/`. The policy receives the live 36-sector
+scan plus `/planner/relative_goal_body` and PX4 velocity, matching the 42-value
+training observation.
+
+### Safety-arbitrated PPO control test
+
+After shadow inference is stable, replace the fourth-terminal dynamic test
+command with:
+
+```bash
+scripts/run_single_rl_avoidance_test.bash
+```
+
+PPO then controls the obstacle-crossing outbound leg. A separate safety
+arbiter rejects stale or non-finite policy data, emergency clearance, and a
+velocity aimed into a blocked sector; rejected commands immediately use the
+proven potential-field velocity. Because the current policy was trained with
+the goal in its forward hemisphere, the return and landing are deliberately
+handled by the traditional controller. The arbiter publishes live decisions
+on `/mupt/uav_1/controller/arbiter`.
+
+Inspect one decision with:
+
+```bash
+ros2 topic echo --once /mupt/uav_1/controller/arbiter \
+  std_msgs/msg/String --qos-reliability best_effort
+```
+
+The final PASS line separately reports PPO control ticks, true safety-fallback
+ticks, and planned traditional-control ticks. Do not run this test unless both
+`run_lidar_rviz.bash` and `run_rl_shadow.bash` are active, and never run it
+together with `offboard_mission`.
