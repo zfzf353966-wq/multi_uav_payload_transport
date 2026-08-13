@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/setup_env.bash"
 
-MODEL_PATH="${MUPT_ROOT}/runs/rl_avoidance_100k/ppo_local_avoidance.zip"
+MODEL_PATH="${MUPT_ROOT}/runs/rl_residual_stack4/ppo_local_avoidance.zip"
 if [[ "${1:-}" == "--model" ]]; then
   MODEL_PATH="${2:-}"
 elif [[ -n "${1:-}" ]]; then

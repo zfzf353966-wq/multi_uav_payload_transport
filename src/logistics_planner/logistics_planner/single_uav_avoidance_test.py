@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import json
 import math
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Sequence
 
 import rclpy
@@ -24,6 +27,7 @@ Point3D = tuple[float, float, float]
 SPAWN_ENU: Point3D = (-34.0, -23.0, 0.13)
 TAKEOFF_ENU: Point3D = (-34.0, -23.0, 6.0)
 OUTBOUND_GOAL_ENU: Point3D = (-6.0, -23.0, 6.0)
+RL_RETURN_APPROACH_DISTANCE = 5.0
 
 
 def enu_to_local_ned(target: Point3D, origin: Point3D) -> Point3D:
@@ -74,6 +78,17 @@ def desired_velocity_enu(
         vx = vy = 0.0
     vz = max(-0.8, min(0.8, vertical_gain * dz))
     return (vx, vy, vz)
+
+
+def use_rl_for_phase(
+    phase: str, rl_return: bool, distance_to_landing: float
+) -> bool:
+    """Keep learned avoidance away from the precision landing approach."""
+    return phase == "outbound" or (
+        phase == "return"
+        and rl_return
+        and distance_to_landing > RL_RETURN_APPROACH_DISTANCE
+    )
 
 
 def body_flu_to_ned(vector: Sequence[float], heading: float) -> Point3D:
@@ -155,12 +170,37 @@ class SingleUAVAvoidanceTest(Node):
         namespace: str = "/mupt_px4_1",
         test_label: str = "static",
         avoidance_source: str = "potential",
+        rl_return: bool = False,
+        output_dir: str | None = None,
     ) -> None:
         super().__init__("single_uav_closed_loop_avoidance_test")
         self.namespace = namespace.rstrip("/")
         self.test_label = test_label
         self.avoidance_source = avoidance_source
+        self.rl_return = rl_return
         self.system_id = 2
+
+        self.output_dir = Path(output_dir).resolve() if output_dir else None
+        self.trace_file = None
+        self.trace_writer = None
+        if self.output_dir is not None:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            self.trace_file = (self.output_dir / "control_trace.csv").open(
+                "w", encoding="utf-8", newline=""
+            )
+            self.trace_writer = csv.DictWriter(
+                self.trace_file,
+                fieldnames=(
+                    "elapsed_s", "phase", "x_enu", "y_enu", "z_enu",
+                    "vx_ned", "vy_ned", "vz_ned", "minimum_scan_m",
+                    "desired_forward", "desired_left", "desired_up",
+                    "potential_forward", "potential_left", "potential_up",
+                    "rl_forward", "rl_left", "rl_up",
+                    "command_forward", "command_left", "command_up",
+                    "source", "reason",
+                ),
+            )
+            self.trace_writer.writeheader()
 
         command_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -269,6 +309,12 @@ class SingleUAVAvoidanceTest(Node):
         self.traditional_ticks = 0
         self.last_arbiter_state = ""
         self.minimum_distance = math.inf
+        self.path_length = 0.0
+        self.previous_trace_position: Point3D | None = None
+        self.near_ticks = {"rl": 0, "fallback": 0, "potential": 0}
+        self.critical_ticks = {"rl": 0, "fallback": 0, "potential": 0}
+        self.control_samples = 0
+        self.summary_written = False
         self.maximum_lateral_deviation = 0.0
         self.abort_reason: str | None = None
         self.complete = False
@@ -432,12 +478,11 @@ class SingleUAVAvoidanceTest(Node):
                 self.avoidance_ticks += 1
 
         decision = arbitrate_velocity(
-            # The current policy was trained with the goal in the forward
-            # hemisphere. Use it on the obstacle-crossing outbound leg only;
-            # the return leg remains under the proven traditional controller.
             requested_source=(
                 self.avoidance_source
-                if self.phase == "outbound"
+                if use_rl_for_phase(
+                    self.phase, self.rl_return, self._distance_to(TAKEOFF_ENU)
+                )
                 else "potential"
             ),
             rl_velocity=self.rl_suggested_body,
@@ -446,6 +491,13 @@ class SingleUAVAvoidanceTest(Node):
             sectors=self.latest_sectors,
         )
         command_ned = body_flu_to_ned(decision.velocity_body, heading)
+        self._record_control_sample(
+            current=current,
+            desired_body=desired_body,
+            potential_body=potential_body,
+            rl_body=self.rl_suggested_body,
+            decision=decision,
+        )
         if decision.source == "rl":
             self.rl_control_ticks += 1
         elif decision.source == "fallback":
@@ -512,6 +564,7 @@ class SingleUAVAvoidanceTest(Node):
         if self.status and self.status.arming_state == VehicleStatus.ARMING_STATE_DISARMED:
             self.success = self.abort_reason is None
             self.complete = True
+            self._write_summary()
             if self.success:
                 self.get_logger().info(
                     f"PASS: UAV 1 {self.test_label} closed-loop avoidance completed; "
@@ -542,6 +595,85 @@ class SingleUAVAvoidanceTest(Node):
                 from_external=False,
             )
         self.command_ticks += 1
+
+    def _record_control_sample(
+        self,
+        *,
+        current: Point3D,
+        desired_body: Point3D,
+        potential_body: Point3D,
+        rl_body: Point3D | None,
+        decision: ArbitrationResult,
+    ) -> None:
+        finite_scan = [value for value in self.latest_sectors if math.isfinite(value)]
+        minimum_scan = min(finite_scan, default=math.inf)
+        self.control_samples += 1
+        if minimum_scan <= 6.0:
+            self.near_ticks[decision.source] += 1
+        if minimum_scan <= 4.0:
+            self.critical_ticks[decision.source] += 1
+        if self.previous_trace_position is not None:
+            self.path_length += math.dist(current, self.previous_trace_position)
+        self.previous_trace_position = current
+        if self.trace_writer is None:
+            return
+        rl = rl_body if rl_body is not None else (math.nan, math.nan, math.nan)
+        self.trace_writer.writerow(
+            {
+                "elapsed_s": f"{time.monotonic() - self.started:.3f}",
+                "phase": self.phase,
+                "x_enu": f"{current[0]:.4f}", "y_enu": f"{current[1]:.4f}",
+                "z_enu": f"{current[2]:.4f}", "vx_ned": f"{self.position.vx:.4f}",
+                "vy_ned": f"{self.position.vy:.4f}", "vz_ned": f"{self.position.vz:.4f}",
+                "minimum_scan_m": f"{minimum_scan:.4f}",
+                "desired_forward": f"{desired_body[0]:.4f}",
+                "desired_left": f"{desired_body[1]:.4f}", "desired_up": f"{desired_body[2]:.4f}",
+                "potential_forward": f"{potential_body[0]:.4f}",
+                "potential_left": f"{potential_body[1]:.4f}", "potential_up": f"{potential_body[2]:.4f}",
+                "rl_forward": f"{rl[0]:.4f}", "rl_left": f"{rl[1]:.4f}",
+                "rl_up": f"{rl[2]:.4f}", "command_forward": f"{decision.velocity_body[0]:.4f}",
+                "command_left": f"{decision.velocity_body[1]:.4f}",
+                "command_up": f"{decision.velocity_body[2]:.4f}",
+                "source": decision.source, "reason": decision.reason,
+            }
+        )
+
+    def _write_summary(self) -> None:
+        if self.summary_written or self.output_dir is None:
+            return
+        self.summary_written = True
+        near_total = sum(self.near_ticks.values())
+        critical_total = sum(self.critical_ticks.values())
+        summary = {
+            "test_label": self.test_label,
+            "configured_source": self.avoidance_source,
+            "success": self.success,
+            "abort_reason": self.abort_reason,
+            "duration_s": round(time.monotonic() - self.started, 3),
+            "path_length_m": round(self.path_length, 3),
+            "minimum_scan_m": round(self.minimum_distance, 3),
+            "maximum_lateral_deviation_m": round(self.maximum_lateral_deviation, 3),
+            "control_samples": self.control_samples,
+            "all_ticks": {
+                "rl": self.rl_control_ticks,
+                "fallback": self.fallback_ticks,
+                "potential": self.traditional_ticks,
+            },
+            "within_6m_ticks": self.near_ticks,
+            "within_4m_ticks": self.critical_ticks,
+            "rl_share_within_6m": round(self.near_ticks["rl"] / near_total, 4) if near_total else 0.0,
+            "rl_share_within_4m": round(self.critical_ticks["rl"] / critical_total, 4) if critical_total else 0.0,
+        }
+        (self.output_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        if self.trace_file is not None:
+            self.trace_file.flush()
+        self.get_logger().info(f"evaluation files written to {self.output_dir}")
+
+    def close_evaluation(self) -> None:
+        if self.trace_file is not None and not self.trace_file.closed:
+            self.trace_file.close()
 
     def _preflight_stable(self) -> bool:
         if self.position is None or self.attitude is None or self.status is None:
@@ -657,13 +789,23 @@ class SingleUAVAvoidanceTest(Node):
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a closed-loop lidar avoidance test on UAV 1")
     parser.add_argument("--namespace", default="/mupt_px4_1")
-    parser.add_argument("--test-label", default="static", choices=("static", "dynamic", "rl_dynamic"))
+    parser.add_argument("--test-label", default="static")
     parser.add_argument("--avoidance-source", default="potential", choices=("potential", "rl"))
+    parser.add_argument(
+        "--rl-return",
+        action="store_true",
+        help="Use the RL policy on the return leg as well as the outbound leg",
+    )
     parser.add_argument("--timeout", type=float, default=190.0)
+    parser.add_argument("--output-dir", default="")
     arguments = parser.parse_args()
     rclpy.init()
     node = SingleUAVAvoidanceTest(
-        arguments.namespace, arguments.test_label, arguments.avoidance_source
+        arguments.namespace,
+        arguments.test_label,
+        arguments.avoidance_source,
+        arguments.rl_return,
+        arguments.output_dir or None,
     )
     deadline = time.monotonic() + arguments.timeout
     try:
@@ -679,6 +821,7 @@ def main() -> None:
         node._abort("operator interrupted the test")
         success = False
     finally:
+        node.close_evaluation()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

@@ -8,6 +8,7 @@ from logistics_planner.single_uav_avoidance_test import (
     desired_velocity_enu,
     directional_clearance,
     limit_vector,
+    use_rl_for_phase,
 )
 
 
@@ -71,3 +72,10 @@ def test_directional_clearance_tracks_forward_sector() -> None:
     sectors = [20.0] * 36
     sectors[12] = 3.0
     assert directional_clearance(sectors, (1.0, 0.0, 0.0)) == pytest.approx(3.0)
+
+
+def test_rl_round_trip_hands_precision_approach_to_traditional_control() -> None:
+    assert use_rl_for_phase("outbound", True, 2.0)
+    assert use_rl_for_phase("return", True, 8.0)
+    assert not use_rl_for_phase("return", True, 4.9)
+    assert not use_rl_for_phase("return", False, 8.0)

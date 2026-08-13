@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import math
 import time
+from collections import deque
 from pathlib import Path
 from typing import Sequence
 
@@ -15,11 +16,12 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 from stable_baselines3 import PPO
 from std_msgs.msg import Float32MultiArray, String
 
+from .rl_avoidance_env import FRAME_STACK, RESIDUAL_SCALE
 from .shadow_avoidance import limit_vector, ned_to_body_flu
 
 
 def build_policy_observation(
-    sectors: Sequence[float],
+    sector_frames: Sequence[Sequence[float]],
     relative_goal_body: Sequence[float],
     velocity_body: Sequence[float],
     *,
@@ -27,17 +29,17 @@ def build_policy_observation(
     goal_scale: float = 25.0,
     velocity_scale: float = 3.0,
 ) -> np.ndarray:
-    """Build the exact 42-value observation used by the training environment."""
-    scan = np.asarray(sectors, dtype=np.float32)
+    """Build the exact 150-value observation used by the residual policy."""
+    scan = np.asarray(sector_frames, dtype=np.float32)
     goal = np.asarray(relative_goal_body, dtype=np.float32)
     velocity = np.asarray(velocity_body, dtype=np.float32)
-    if scan.shape != (36,) or goal.shape != (3,) or velocity.shape != (3,):
-        raise ValueError("expected 36 sectors, 3 goal values, and 3 velocity values")
+    if scan.shape != (FRAME_STACK, 36) or goal.shape != (3,) or velocity.shape != (3,):
+        raise ValueError("expected four 36-sector frames, 3 goal values, and 3 velocity values")
     if not all(np.isfinite(values).all() for values in (scan, goal, velocity)):
         raise ValueError("policy observation inputs must be finite")
     return np.concatenate(
         (
-            np.clip(scan / sensor_range, 0.0, 1.0),
+            np.clip(scan.reshape(-1) / sensor_range, 0.0, 1.0),
             np.clip(goal / goal_scale, -1.0, 1.0),
             np.clip(velocity / velocity_scale, -1.0, 1.0),
         )
@@ -46,18 +48,18 @@ def build_policy_observation(
 
 def policy_action_to_velocity(
     action: Sequence[float],
-    desired_velocity_body: Sequence[float],
+    potential_velocity_body: Sequence[float],
     *,
-    correction_scale: float = 2.0,
+    correction_scale: float = RESIDUAL_SCALE,
     maximum_speed: float = 3.0,
 ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
     normalized = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
-    desired = np.asarray(desired_velocity_body, dtype=np.float32)
-    if normalized.shape != (3,) or desired.shape != (3,):
-        raise ValueError("action and desired velocity must contain three values")
+    potential = np.asarray(potential_velocity_body, dtype=np.float32)
+    if normalized.shape != (3,) or potential.shape != (3,):
+        raise ValueError("action and potential velocity must contain three values")
     correction = tuple(float(value) for value in normalized * correction_scale)
     suggested = limit_vector(
-        tuple(float(desired[index]) + correction[index] for index in range(3)),
+        tuple(float(potential[index]) + correction[index] for index in range(3)),
         maximum_speed,
     )
     return correction, suggested
@@ -107,14 +109,22 @@ class RLShadowInference(Node):
             sensor_qos,
         )
         self.create_subscription(
+            Vector3Stamped,
+            "/mupt/uav_1/avoidance/suggested_velocity_body",
+            self._potential_callback,
+            sensor_qos,
+        )
+        self.create_subscription(
             VehicleLocalPosition,
             self.namespace + "/fmu/out/vehicle_local_position_v1",
             self._position_callback,
             sensor_qos,
         )
         self.sectors: tuple[float, ...] | None = None
+        self.sector_frames: deque[tuple[float, ...]] = deque(maxlen=FRAME_STACK)
         self.relative_goal: tuple[float, float, float] | None = None
         self.desired_velocity: tuple[float, float, float] | None = None
+        self.potential_velocity: tuple[float, float, float] | None = None
         self.position: VehicleLocalPosition | None = None
         self.update_times: dict[str, float] = {}
         self.inference_count = 0
@@ -128,6 +138,11 @@ class RLShadowInference(Node):
     def _sectors_callback(self, message: Float32MultiArray) -> None:
         if len(message.data) == 36 and all(math.isfinite(value) for value in message.data):
             self.sectors = tuple(float(value) for value in message.data)
+            if not self.sector_frames:
+                for _ in range(FRAME_STACK):
+                    self.sector_frames.append(self.sectors)
+            else:
+                self.sector_frames.append(self.sectors)
             self.update_times["sectors"] = time.monotonic()
 
     def _goal_callback(self, message: Vector3Stamped) -> None:
@@ -137,6 +152,10 @@ class RLShadowInference(Node):
     def _desired_callback(self, message: Vector3Stamped) -> None:
         self.desired_velocity = self._vector(message)
         self.update_times["desired"] = time.monotonic()
+
+    def _potential_callback(self, message: Vector3Stamped) -> None:
+        self.potential_velocity = self._vector(message)
+        self.update_times["potential"] = time.monotonic()
 
     def _position_callback(self, message: VehicleLocalPosition) -> None:
         if all(math.isfinite(value) for value in (message.vx, message.vy, message.vz, message.heading)):
@@ -149,7 +168,7 @@ class RLShadowInference(Node):
 
     def _update(self) -> None:
         now = time.monotonic()
-        required = ("sectors", "goal", "desired", "position")
+        required = ("sectors", "goal", "desired", "potential", "position")
         if any(name not in self.update_times or now - self.update_times[name] > 0.5 for name in required):
             if now - self.last_wait_log > 5.0:
                 missing = [
@@ -164,19 +183,19 @@ class RLShadowInference(Node):
             (self.position.vx, self.position.vy, self.position.vz), self.position.heading
         )
         observation = build_policy_observation(
-            self.sectors, self.relative_goal, velocity_body
+            tuple(self.sector_frames), self.relative_goal, velocity_body
         )
         started = time.perf_counter()
         action, _ = self.model.predict(observation, deterministic=True)
         latency_ms = (time.perf_counter() - started) * 1000.0
-        correction, suggested = policy_action_to_velocity(action, self.desired_velocity)
+        correction, suggested = policy_action_to_velocity(action, self.potential_velocity)
         self._publish_vector(action, self.action_publisher)
         self._publish_vector(correction, self.correction_publisher)
         self._publish_vector(suggested, self.suggested_publisher)
         status = String()
         status.data = (
             f"SHADOW count={self.inference_count} latency={latency_ms:.2f}ms "
-            f"min_scan={min(self.sectors):.2f}m"
+            f"min_scan={min(self.sectors):.2f}m residual_scale={RESIDUAL_SCALE:.2f}"
         )
         self.status_publisher.publish(status)
         self.inference_count += 1

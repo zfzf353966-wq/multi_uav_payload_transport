@@ -19,6 +19,7 @@ def evaluate(model: PPO | None, episodes: int, seed: int) -> dict[str, float]:
     collisions = 0
     geofence_exits = 0
     timeouts = 0
+    outbound_completions = 0
     minimum_clearances = []
     for episode in range(episodes):
         observation, _ = env.reset(seed=seed + episode)
@@ -38,6 +39,7 @@ def evaluate(model: PPO | None, episodes: int, seed: int) -> dict[str, float]:
         collisions += int(info["collision"])
         geofence_exits += int(info["outside"])
         timeouts += int(truncated)
+        outbound_completions += int(info["outbound_complete"])
         minimum_clearances.append(episode_clearance)
     env.close()
     return {
@@ -47,6 +49,7 @@ def evaluate(model: PPO | None, episodes: int, seed: int) -> dict[str, float]:
         "collision_rate": collisions / episodes,
         "geofence_exit_rate": geofence_exits / episodes,
         "timeout_rate": timeouts / episodes,
+        "outbound_completion_rate": outbound_completions / episodes,
         "mean_minimum_clearance": float(np.mean(minimum_clearances)),
     }
 
@@ -93,7 +96,7 @@ def main() -> None:
     metrics = {
         "timesteps": arguments.timesteps,
         "seed": arguments.seed,
-        "nominal_baseline": evaluate(None, arguments.eval_episodes, evaluation_seed),
+        "potential_field_baseline": evaluate(None, arguments.eval_episodes, evaluation_seed),
         "trained_policy": evaluate(loaded, arguments.eval_episodes, evaluation_seed),
     }
     metrics_path = arguments.output_dir / "metrics.json"

@@ -202,11 +202,20 @@ PASS: UAV 1 dynamic closed-loop avoidance completed; avoidance_ticks=..., minimu
 ## Lightweight reinforcement-learning environment
 
 `UAVLocalAvoidanceEnv` is a fast Gymnasium environment used before expensive
-Gazebo/PX4 training. Its 42-value observation contains the normalized 3x12
-lidar sectors, relative goal position, and vehicle velocity. The three
-continuous actions are bounded forward-left-up velocity corrections. Moving
-spheres are randomized at every reset, and rewards cover goal progress,
-clearance, smooth control, collision, geofence exit, and successful arrival.
+Gazebo/PX4 training. Its 150-value observation contains four consecutive
+normalized 3x12 lidar frames, relative goal position, and vehicle velocity.
+The four frames cover about 0.3 seconds and expose obstacle approach trends.
+The three continuous actions are bounded forward-left-up residual corrections
+on top of the artificial-potential-field suggestion. Route
+direction, vehicle heading, and five moving spheres are randomized at every
+reset. Each episode requires an outbound leg and a return to the start;
+rewards cover goal progress, clearance, smooth control, collision, geofence
+exit, the outbound waypoint, and successful return.
+
+The reward also penalizes predicted time-to-collision below six seconds,
+approaching the geofence before an actual violation, and excessive departure
+from the global route. A zero RL action exactly preserves the potential-field
+baseline, so PPO only has to learn when and how to improve that controller.
 
 Run a short end-to-end PPO smoke test without starting ROS or Gazebo:
 
@@ -239,6 +248,37 @@ The evaluation reports success, collision, geofence-exit, and timeout rates.
 Passing this lightweight gate only permits a policy to enter advisory Gazebo
 inference. It must still pass Gazebo shadow comparison and the existing
 single-UAV safety controller before it is allowed to command PX4.
+
+The earlier direct-correction round-trip policy was trained with:
+
+```bash
+scripts/train_rl_avoidance.bash \
+  --timesteps 300000 \
+  --eval-episodes 300 \
+  --n-envs 8 \
+  --output-dir runs/rl_round_trip_300k
+```
+
+Its fixed-seed holdout result was 64% complete round trips, 12.7% collisions,
+22.3% geofence exits, and 86% outbound completion. The model is stored under
+`runs/`, which is intentionally excluded from Git; train it locally before
+starting the PPO shadow process.
+
+The current four-frame residual policy is trained with:
+
+```bash
+scripts/train_rl_avoidance.bash \
+  --timesteps 300000 \
+  --eval-episodes 300 \
+  --n-envs 8 \
+  --output-dir runs/rl_residual_stack4
+```
+
+On the fixed 300-episode lightweight holdout, the potential-field baseline
+achieved 91.33% success, 1.33% collision, and 7.33% timeout. The residual PPO
+achieved 97.33% success, 0.33% collision, 1.67% geofence exit, and 0.67%
+timeout. Gazebo safety arbitration and the hard geofence therefore remain
+mandatory despite the higher lightweight success rate.
 
 ### PPO shadow inference in Gazebo
 
@@ -276,9 +316,10 @@ ros2 topic echo --once /mupt/uav_1/rl_shadow/status \
 
 The expected frequency is about 10 Hz. Available outputs are
 `action_normalized`, `correction_body`, `suggested_velocity_body`, and
-`status` below `/mupt/uav_1/rl_shadow/`. The policy receives the live 36-sector
-scan plus `/planner/relative_goal_body` and PX4 velocity, matching the 42-value
-training observation.
+`status` below `/mupt/uav_1/rl_shadow/`. The policy receives four live
+36-sector frames plus `/planner/relative_goal_body` and PX4 velocity, matching
+the 150-value training observation. Its correction is added to the live
+potential-field velocity rather than directly to the nominal goal velocity.
 
 ### Safety-arbitrated PPO control test
 
@@ -292,10 +333,8 @@ scripts/run_single_rl_avoidance_test.bash
 PPO then controls the obstacle-crossing outbound leg. A separate safety
 arbiter rejects stale or non-finite policy data, emergency clearance, and a
 velocity aimed into a blocked sector; rejected commands immediately use the
-proven potential-field velocity. Because the current policy was trained with
-the goal in its forward hemisphere, the return and landing are deliberately
-handled by the traditional controller. The arbiter publishes live decisions
-on `/mupt/uav_1/controller/arbiter`.
+proven potential-field velocity. The arbiter publishes live decisions on
+`/mupt/uav_1/controller/arbiter`.
 
 Inspect one decision with:
 
@@ -308,3 +347,77 @@ The final PASS line separately reports PPO control ticks, true safety-fallback
 ticks, and planned traditional-control ticks. Do not run this test unless both
 `run_lidar_rviz.bash` and `run_rl_shadow.bash` are active, and never run it
 together with `offboard_mission`.
+
+### Complex single-UAV round trip
+
+The final single-UAV gate adds three independently orbiting spheres across the
+28 m route and lets PPO control both outbound and return cruise. The same
+safety arbiter immediately selects the potential-field command when policy
+data are stale, invalid, too close to an obstacle, or aimed into a blocked
+sector. Within 5 m of the launch point, control deliberately changes to the
+traditional controller for precise approach and landing.
+
+Start these four commands in separate terminals:
+
+```bash
+scripts/run_three_px4.bash --gui
+```
+
+```bash
+scripts/run_lidar_rviz.bash
+```
+
+```bash
+scripts/run_rl_shadow.bash
+```
+
+```bash
+scripts/run_single_complex_round_trip.bash
+```
+
+Only UAV 1 is armed; UAV 2 and UAV 3 remain idle. The temporary colored
+spheres are removed when the fourth command exits. A validated run ended with
+`PASS`, 307 PPO control ticks, 28 safety-fallback ticks, 37 precision-approach
+ticks, and a 1.16 m minimum lidar clearance.
+
+For a controlled A/B comparison, select the controller explicitly. The
+potential-field run needs the simulation and lidar terminals only:
+
+```bash
+scripts/run_single_complex_round_trip.bash --controller potential
+```
+
+Restart the simulation to reset PX4 and obstacle timing, start the PPO shadow
+terminal as well, then run:
+
+```bash
+scripts/run_single_complex_round_trip.bash --controller rl
+```
+
+Each run writes `control_trace.csv` and `summary.json` below
+`runs/avoidance_ab/`. The trace records both candidate velocities, the command
+actually selected, minimum scan distance, position, phase, decision source,
+and rejection reason at 10 Hz. The summary reports duration, path length,
+minimum clearance, and how often PPO was genuinely selected while an obstacle
+was within 6 m and 4 m. Compare repeated runs rather than drawing a conclusion
+from a single obstacle phase.
+
+Run the complete five-scenario headless batch with:
+
+```bash
+scripts/run_avoidance_ab_batch.bash
+```
+
+For a shorter pipeline check, select scenario IDs explicitly:
+
+```bash
+scripts/run_avoidance_ab_batch.bash --scenarios 1,2
+```
+
+The batch restarts PX4 and Gazebo for every controller run, varies obstacle
+orbit centres, radii, initial phases, speeds, and directions from a deterministic
+scenario number, and writes `comparison.csv` plus `report.json` in the batch
+directory. Mission failures are recorded as experimental outcomes and do not
+stop the remaining runs. Small PX4 startup-time differences can still shift an
+obstacle's phase when the vehicle reaches it, so repeat batches are required
+for statistically meaningful rates.
