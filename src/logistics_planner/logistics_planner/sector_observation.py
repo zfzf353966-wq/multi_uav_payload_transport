@@ -8,7 +8,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py import point_cloud2
-from std_msgs.msg import Float32MultiArray, MultiArrayDimension
+from std_msgs.msg import Float32, Float32MultiArray, MultiArrayDimension
 
 
 LAYER_NAMES = ("lower", "middle", "upper")
@@ -68,6 +68,21 @@ def make_observation_message(values: Sequence[float], sector_count: int) -> Floa
     return message
 
 
+def minimum_point_distance(
+    points: Iterable[Sequence[float]], *, max_range: float = 15.0
+) -> float:
+    """Return the nearest finite point in a small downward lidar cone."""
+    minimum = float(max_range)
+    for point in points:
+        x, y, z = float(point[0]), float(point[1]), float(point[2])
+        if not (math.isfinite(x) and math.isfinite(y) and math.isfinite(z)):
+            continue
+        distance = math.sqrt(x * x + y * y + z * z)
+        if 0.0 < distance <= max_range:
+            minimum = min(minimum, distance)
+    return minimum
+
+
 class SectorObservationNode(Node):
     """Compress three organized lidar point clouds into 36 distance values."""
 
@@ -81,17 +96,31 @@ class SectorObservationNode(Node):
             raise ValueError("sector_count and max_range must be positive")
 
         self.output_publishers = {}
+        self.down_output_publishers = {}
         self.input_subscriptions = []
         for index in range(1, 4):
             output_topic = f"/mupt/uav_{index}/observation/sectors"
             self.output_publishers[index] = self.create_publisher(
                 Float32MultiArray, output_topic, qos_profile_sensor_data
             )
+            self.down_output_publishers[index] = self.create_publisher(
+                Float32,
+                f"/mupt/uav_{index}/observation/down_clearance",
+                qos_profile_sensor_data,
+            )
             self.input_subscriptions.append(
                 self.create_subscription(
                     PointCloud2,
                     f"/mupt/uav_{index}/scan/points",
                     lambda message, index=index: self._point_cloud_callback(index, message),
+                    qos_profile_sensor_data,
+                )
+            )
+            self.input_subscriptions.append(
+                self.create_subscription(
+                    PointCloud2,
+                    f"/mupt/uav_{index}/down_scan/points",
+                    lambda message, index=index: self._down_cloud_callback(index, message),
                     qos_profile_sensor_data,
                 )
             )
@@ -118,6 +147,14 @@ class SectorObservationNode(Node):
         self.output_publishers[index].publish(
             make_observation_message(values, self.sector_count)
         )
+
+    def _down_cloud_callback(self, index: int, message: PointCloud2) -> None:
+        points = point_cloud2.read_points(
+            message, field_names=["x", "y", "z"], skip_nans=False
+        )
+        output = Float32()
+        output.data = minimum_point_distance(points, max_range=15.0)
+        self.down_output_publishers[index].publish(output)
 
 
 def main() -> None:

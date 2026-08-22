@@ -56,6 +56,9 @@ BRIDGES=(
   "/mupt/uav_1/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
   "/mupt/uav_2/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
   "/mupt/uav_3/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
+  "/mupt/uav_1/down_scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
+  "/mupt/uav_2/down_scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
+  "/mupt/uav_3/down_scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
 )
 
 echo "Starting Gazebo-to-ROS 2 lidar bridge..."
@@ -96,6 +99,7 @@ echo "  /mupt/uav_2/scan"
 echo "  /mupt/uav_3/scan"
 echo "Three-layer point clouds are available below each scan topic as /points."
 echo "36-value observations are available as /mupt/uav_N/observation/sectors."
+echo "Downward clearance is available as /mupt/uav_N/observation/down_clearance."
 echo "Shadow suggestions are available as /mupt/uav_N/avoidance/*."
 echo "Logs: ${RUN_DIR}"
 echo "Press Ctrl-C to stop this bridge (the Gazebo simulation keeps running)."

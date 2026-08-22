@@ -354,8 +354,25 @@ The final single-UAV gate adds three independently orbiting spheres across the
 28 m route and lets PPO control both outbound and return cruise. The same
 safety arbiter immediately selects the potential-field command when policy
 data are stale, invalid, too close to an obstacle, or aimed into a blocked
-sector. Within 5 m of the launch point, control deliberately changes to the
-traditional controller for precise approach and landing.
+sector. Emergency avoidance begins at 3.8 m and commands a 3 m/s horizontal
+away-and-tangential escape, including for an obstacle approaching from behind.
+The clearer left/right side is selected once at emergency entry and remains
+locked, preventing rapidly orbiting obstacles from reversing the command
+before the X500 can respond. It remains
+latched until the measured clearance exceeds 4.2 m for five consecutive control
+ticks. This narrow hysteresis preserves the 3.8 m fast trigger without keeping
+the UAV trapped in retreat after clearance has recovered. The
+lidar keeps its lightweight three-layer layout and retains useful measurements
+down to 0.6 m. A run cannot pass when clearance stays below the 0.8 m
+no-contact gate for two control ticks. A separate 5 x 5 downward cone on each
+UAV closes the nadir blind spot without changing PPO's 3 x 12 observation;
+descent is inhibited below 2 m downward clearance. A predictive
+altitude filter projects only the vertical velocity component that would leave
+the 2--10 m safety range within 1.5 s; PPO remains the reported control source
+with reason `geofence_guarded:z`. Horizontal `x/y` map limits are intentionally
+disabled during this validation phase, so an avoidance manoeuvre may leave the
+nominal map area. Within 5 m of the launch point, control deliberately changes
+to the traditional controller for precise approach and landing.
 
 Start these four commands in separate terminals:
 

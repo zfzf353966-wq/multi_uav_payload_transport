@@ -21,13 +21,27 @@ from px4_msgs.msg import (
 )
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from std_msgs.msg import Float32MultiArray, String
+from std_msgs.msg import Float32, Float32MultiArray, String
 
 Point3D = tuple[float, float, float]
 SPAWN_ENU: Point3D = (-34.0, -23.0, 0.13)
 TAKEOFF_ENU: Point3D = (-34.0, -23.0, 6.0)
 OUTBOUND_GOAL_ENU: Point3D = (-6.0, -23.0, 6.0)
 RL_RETURN_APPROACH_DISTANCE = 5.0
+GEOFENCE_MIN_ENU: Point3D = (-37.0, -29.0, 2.0)
+GEOFENCE_MAX_ENU: Point3D = (1.0, -16.0, 10.0)
+GEOFENCE_SOFT_MARGIN: Point3D = (2.0, 2.0, 1.0)
+GEOFENCE_LOOKAHEAD_SECONDS = 1.5
+ALTITUDE_MIN_ENU = 2.0
+ALTITUDE_MAX_ENU = 10.0
+ALTITUDE_SOFT_MARGIN = 1.0
+EMERGENCY_ENTER_DISTANCE = 3.8
+EMERGENCY_EXIT_DISTANCE = 4.2
+EMERGENCY_RELEASE_TICKS = 5
+EMERGENCY_HORIZONTAL_ESCAPE_SPEED = 3.0
+EMERGENCY_ESCAPE_SPEED = 3.0
+MINIMUM_PASS_CLEARANCE = 0.8
+DOWNWARD_STOP_CLEARANCE = 2.0
 
 
 def enu_to_local_ned(target: Point3D, origin: Point3D) -> Point3D:
@@ -102,11 +116,195 @@ def body_flu_to_ned(vector: Sequence[float], heading: float) -> Point3D:
     )
 
 
+def ned_vector_to_enu(vector: Sequence[float]) -> Point3D:
+    north, east, down = map(float, vector)
+    return (east, north, -down)
+
+
+def enu_vector_to_ned(vector: Sequence[float]) -> Point3D:
+    east, north, up = map(float, vector)
+    return (north, east, -up)
+
+
 @dataclass(frozen=True)
 class ArbitrationResult:
     velocity_body: Point3D
     source: str
     reason: str
+
+
+@dataclass(frozen=True)
+class GeofenceGuardResult:
+    velocity_enu: Point3D
+    guarded_axes: tuple[str, ...]
+
+
+def guard_geofence_velocity(
+    position_enu: Sequence[float],
+    velocity_enu: Sequence[float],
+    *,
+    lower: Point3D = GEOFENCE_MIN_ENU,
+    upper: Point3D = GEOFENCE_MAX_ENU,
+    soft_margin: Point3D = GEOFENCE_SOFT_MARGIN,
+    lookahead_seconds: float = GEOFENCE_LOOKAHEAD_SECONDS,
+) -> GeofenceGuardResult:
+    """Project velocity so its lookahead point remains inside a soft fence.
+
+    This is a deterministic safety filter, not a replacement controller. It
+    changes only velocity components that would continue toward a boundary;
+    all other PPO residual components remain untouched.
+    """
+    position = tuple(float(value) for value in position_enu)
+    velocity = tuple(float(value) for value in velocity_enu)
+    if len(position) != 3 or len(velocity) != 3:
+        raise ValueError("position and velocity must contain three values")
+    if lookahead_seconds <= 0.0:
+        raise ValueError("lookahead_seconds must be positive")
+
+    guarded = list(velocity)
+    guarded_axes = []
+    axis_names = ("x", "y", "z")
+    for axis, name in enumerate(axis_names):
+        soft_lower = lower[axis] + soft_margin[axis]
+        soft_upper = upper[axis] - soft_margin[axis]
+        minimum_velocity = (soft_lower - position[axis]) / lookahead_seconds
+        maximum_velocity = (soft_upper - position[axis]) / lookahead_seconds
+        projected = min(max(guarded[axis], minimum_velocity), maximum_velocity)
+        if not math.isclose(projected, guarded[axis], abs_tol=1e-6):
+            guarded[axis] = projected
+            guarded_axes.append(name)
+    return GeofenceGuardResult(
+        (guarded[0], guarded[1], guarded[2]), tuple(guarded_axes)
+    )
+
+
+def guard_altitude_velocity(
+    position_enu: Sequence[float], velocity_enu: Sequence[float]
+) -> GeofenceGuardResult:
+    """Apply the predictive safety filter only to altitude.
+
+    Horizontal map bounds are deliberately unrestricted during the current
+    algorithm-validation phase so avoidance can leave the nominal map area.
+    """
+    return guard_geofence_velocity(
+        position_enu,
+        velocity_enu,
+        lower=(-math.inf, -math.inf, ALTITUDE_MIN_ENU),
+        upper=(math.inf, math.inf, ALTITUDE_MAX_ENU),
+        soft_margin=(0.0, 0.0, ALTITUDE_SOFT_MARGIN),
+    )
+
+
+def update_emergency_latch(
+    active: bool,
+    clear_ticks: int,
+    minimum_scan: float,
+    *,
+    enter_distance: float = EMERGENCY_ENTER_DISTANCE,
+    exit_distance: float = EMERGENCY_EXIT_DISTANCE,
+    release_ticks: int = EMERGENCY_RELEASE_TICKS,
+) -> tuple[bool, int]:
+    """Latch conservative avoidance until clearance is stably restored."""
+    if not math.isfinite(minimum_scan) or minimum_scan <= enter_distance:
+        return True, 0
+    if not active:
+        return False, 0
+    if minimum_scan < exit_distance:
+        return True, 0
+    clear_ticks += 1
+    if clear_ticks >= release_ticks:
+        return False, 0
+    return True, clear_ticks
+
+
+def emergency_escape_velocity(
+    sectors: Sequence[float],
+    *,
+    tangent_sign: int = 1,
+    influence_distance: float = EMERGENCY_EXIT_DISTANCE,
+    horizontal_speed: float = EMERGENCY_HORIZONTAL_ESCAPE_SPEED,
+) -> Point3D:
+    """Return a locked-side horizontal escape velocity.
+
+    Unlike the route-following potential field, emergency escape considers all
+    azimuths. This matters for moving obstacles that can overtake the vehicle
+    from behind. The tangential component prevents pure backward flight, while
+    a caller-held tangent sign prevents left/right command reversal.
+    """
+    if len(sectors) != 36:
+        return (0.0, 0.0, 0.0)
+    repulsion_forward = 0.0
+    repulsion_left = 0.0
+    nearest: tuple[float, int] | None = None
+    for sector in range(12):
+        distances = [
+            float(sectors[layer * 12 + sector])
+            for layer in range(3)
+            if math.isfinite(float(sectors[layer * 12 + sector]))
+        ]
+        if not distances:
+            continue
+        distance = min(distances)
+        if nearest is None or distance < nearest[0]:
+            nearest = (distance, sector)
+        if distance >= influence_distance:
+            continue
+        azimuth = sector * 2.0 * math.pi / 12.0
+        proximity = (influence_distance - max(0.05, distance)) / influence_distance
+        weight = proximity * proximity / max(0.2, distance)
+        repulsion_forward -= math.cos(azimuth) * weight
+        repulsion_left -= math.sin(azimuth) * weight
+
+    magnitude = math.hypot(repulsion_forward, repulsion_left)
+    if magnitude < 1e-6 and nearest is not None and nearest[0] < influence_distance:
+        azimuth = nearest[1] * 2.0 * math.pi / 12.0
+        repulsion_forward = -math.cos(azimuth)
+        repulsion_left = -math.sin(azimuth)
+        magnitude = 1.0
+    if magnitude < 1e-6:
+        return (0.0, 0.0, 0.0)
+    away_forward = repulsion_forward / magnitude
+    away_left = repulsion_left / magnitude
+    tangent_forward = -away_left * (1 if tangent_sign >= 0 else -1)
+    tangent_left = away_forward * (1 if tangent_sign >= 0 else -1)
+    combined_forward = 0.55 * away_forward + 0.85 * tangent_forward
+    combined_left = 0.55 * away_left + 0.85 * tangent_left
+    combined_norm = math.hypot(combined_forward, combined_left)
+    return (
+        horizontal_speed * combined_forward / combined_norm,
+        horizontal_speed * combined_left / combined_norm,
+        0.0,
+    )
+
+
+def choose_emergency_tangent_sign(
+    sectors: Sequence[float], desired_velocity: Sequence[float]
+) -> int:
+    """Choose one side at emergency entry and keep it for the whole episode."""
+    if len(sectors) != 36:
+        return 1
+    sector_distances = [
+        min(float(sectors[layer * 12 + sector]) for layer in range(3))
+        for sector in range(12)
+    ]
+    nearest_sector = min(range(12), key=sector_distances.__getitem__)
+    azimuth = nearest_sector * 2.0 * math.pi / 12.0
+    away = (-math.cos(azimuth), -math.sin(azimuth))
+    positive_tangent = (-away[1], away[0])
+    desired_forward, desired_left = map(float, desired_velocity[:2])
+    alignment = (
+        positive_tangent[0] * desired_forward + positive_tangent[1] * desired_left
+    )
+    if abs(alignment) > 0.1:
+        return 1 if alignment >= 0.0 else -1
+    left_clearance = min(
+        sector_distances[sector] for sector in (1, 2, 3, 4, 5)
+    )
+    right_clearance = min(
+        sector_distances[sector] for sector in (7, 8, 9, 10, 11)
+    )
+    # For a forward obstacle, negative follows the body-left tangent.
+    return -1 if left_clearance >= right_clearance else 1
 
 
 def directional_clearance(sectors: Sequence[float], velocity_body: Sequence[float]) -> float:
@@ -138,7 +336,7 @@ def arbitrate_velocity(
     fallback_velocity: Sequence[float],
     sectors: Sequence[float],
     maximum_speed: float = 2.0,
-    emergency_distance: float = 2.2,
+    emergency_distance: float = EMERGENCY_ENTER_DISTANCE,
 ) -> ArbitrationResult:
     """Select PPO only inside a conservative envelope, otherwise fall back."""
     fallback = limit_vector(fallback_velocity, maximum_speed)
@@ -193,6 +391,7 @@ class SingleUAVAvoidanceTest(Node):
                 fieldnames=(
                     "elapsed_s", "phase", "x_enu", "y_enu", "z_enu",
                     "vx_ned", "vy_ned", "vz_ned", "minimum_scan_m",
+                    "down_clearance_m",
                     "desired_forward", "desired_left", "desired_up",
                     "potential_forward", "potential_left", "potential_up",
                     "rl_forward", "rl_left", "rl_up",
@@ -276,6 +475,12 @@ class SingleUAVAvoidanceTest(Node):
             sensor_qos,
         )
         self.create_subscription(
+            Float32,
+            "/mupt/uav_1/observation/down_clearance",
+            self._down_clearance_callback,
+            sensor_qos,
+        )
+        self.create_subscription(
             Vector3Stamped,
             "/mupt/uav_1/rl_shadow/suggested_velocity_body",
             self._rl_suggestion_callback,
@@ -290,6 +495,9 @@ class SingleUAVAvoidanceTest(Node):
         self.rl_suggested_body: Point3D | None = None
         self.rl_suggestion_time = 0.0
         self.latest_sectors: tuple[float, ...] = tuple([20.0] * 36)
+        self.down_clearance = math.inf
+        self.down_clearance_time = 0.0
+        self.minimum_down_clearance = math.inf
         self.action = ""
         self.action_time = 0.0
         self.phase = "prestream"
@@ -307,8 +515,16 @@ class SingleUAVAvoidanceTest(Node):
         self.rl_control_ticks = 0
         self.fallback_ticks = 0
         self.traditional_ticks = 0
+        self.geofence_guard_ticks = 0
+        self.emergency_latched = False
+        self.emergency_clear_ticks = 0
+        self.emergency_latch_ticks = 0
+        self.emergency_tangent_sign = 0
+        self.downward_guard_ticks = 0
         self.last_arbiter_state = ""
         self.minimum_distance = math.inf
+        self.contact_risk_ticks = 0
+        self.maximum_contact_risk_ticks = 0
         self.path_length = 0.0
         self.previous_trace_position: Point3D | None = None
         self.near_ticks = {"rl": 0, "fallback": 0, "potential": 0}
@@ -356,6 +572,12 @@ class SingleUAVAvoidanceTest(Node):
         finite = [float(value) for value in message.data if math.isfinite(value) and value > 0.05]
         if finite:
             self.minimum_distance = min(self.minimum_distance, min(finite))
+
+    def _down_clearance_callback(self, message: Float32) -> None:
+        value = float(message.data)
+        if math.isfinite(value) and value > 0.0:
+            self.down_clearance = value
+            self.down_clearance_time = time.monotonic()
 
     def _tick(self) -> None:
         now = time.monotonic()
@@ -467,6 +689,10 @@ class SingleUAVAvoidanceTest(Node):
         self._publish_relative_goal_body(ned_vector_to_body_flu(relative_ned, heading))
 
         now = time.monotonic()
+        if now - self.down_clearance_time <= 0.5:
+            self.minimum_down_clearance = min(
+                self.minimum_down_clearance, self.down_clearance
+            )
         if self.suggested_body is None or now - self.suggestion_time > 0.5:
             if now - self.phase_started > 1.5:
                 self._abort("avoidance suggestion became stale for more than 0.5 s")
@@ -477,27 +703,79 @@ class SingleUAVAvoidanceTest(Node):
             if now - self.action_time <= 0.5 and self.action and not self.action.startswith("CLEAR"):
                 self.avoidance_ticks += 1
 
-        decision = arbitrate_velocity(
-            requested_source=(
-                self.avoidance_source
-                if use_rl_for_phase(
-                    self.phase, self.rl_return, self._distance_to(TAKEOFF_ENU)
-                )
-                else "potential"
-            ),
-            rl_velocity=self.rl_suggested_body,
-            rl_age=now - self.rl_suggestion_time,
-            fallback_velocity=potential_body,
-            sectors=self.latest_sectors,
+        finite_scan = [value for value in self.latest_sectors if math.isfinite(value)]
+        minimum_scan = min(finite_scan, default=math.inf)
+        if minimum_scan < MINIMUM_PASS_CLEARANCE:
+            self.contact_risk_ticks += 1
+            self.maximum_contact_risk_ticks = max(
+                self.maximum_contact_risk_ticks, self.contact_risk_ticks
+            )
+        else:
+            self.contact_risk_ticks = 0
+        was_emergency_latched = self.emergency_latched
+        self.emergency_latched, self.emergency_clear_ticks = update_emergency_latch(
+            self.emergency_latched, self.emergency_clear_ticks, minimum_scan
         )
-        command_ned = body_flu_to_ned(decision.velocity_body, heading)
-        self._record_control_sample(
-            current=current,
-            desired_body=desired_body,
-            potential_body=potential_body,
-            rl_body=self.rl_suggested_body,
-            decision=decision,
+        if self.emergency_latched and not was_emergency_latched:
+            self.emergency_tangent_sign = choose_emergency_tangent_sign(
+                self.latest_sectors, desired_body
+            )
+        elif not self.emergency_latched:
+            self.emergency_tangent_sign = 0
+        if self.emergency_latched:
+            self.emergency_latch_ticks += 1
+            decision = ArbitrationResult(
+                emergency_escape_velocity(
+                    self.latest_sectors,
+                    tangent_sign=self.emergency_tangent_sign,
+                ),
+                "fallback",
+                "emergency_horizontal_escape",
+            )
+        else:
+            decision = arbitrate_velocity(
+                requested_source=(
+                    self.avoidance_source
+                    if use_rl_for_phase(
+                        self.phase, self.rl_return, self._distance_to(TAKEOFF_ENU)
+                    )
+                    else "potential"
+                ),
+                rl_velocity=self.rl_suggested_body,
+                rl_age=now - self.rl_suggestion_time,
+                fallback_velocity=potential_body,
+                sectors=self.latest_sectors,
+            )
+        speed_limit = EMERGENCY_ESCAPE_SPEED if self.emergency_latched else 2.0
+        command_ned = limit_vector(
+            body_flu_to_ned(decision.velocity_body, heading), speed_limit
         )
+        # Avoidance remains horizontal; altitude is independently stabilized.
+        altitude_error = target[2] - current[2]
+        command_ned = (
+            command_ned[0],
+            command_ned[1],
+            -max(-0.8, min(0.8, altitude_error)),
+        )
+        decision_reason = decision.reason
+        down_data_fresh = now - self.down_clearance_time <= 0.5
+        if command_ned[2] > 0.0 and (
+            not down_data_fresh or self.down_clearance < DOWNWARD_STOP_CLEARANCE
+        ):
+            command_ned = (command_ned[0], command_ned[1], 0.0)
+            self.downward_guard_ticks += 1
+            decision_reason = "downward_guarded"
+        guard = guard_altitude_velocity(current, ned_vector_to_enu(command_ned))
+        command_ned = enu_vector_to_ned(guard.velocity_enu)
+        if guard.guarded_axes:
+            self.geofence_guard_ticks += 1
+            decision_reason = "geofence_guarded:" + ",".join(guard.guarded_axes)
+        decision = ArbitrationResult(
+            ned_vector_to_body_flu(command_ned, heading),
+            decision.source,
+            decision_reason,
+        )
+
         if decision.source == "rl":
             self.rl_control_ticks += 1
         elif decision.source == "fallback":
@@ -509,23 +787,31 @@ class SingleUAVAvoidanceTest(Node):
         arbiter_message.data = (
             f"source={decision.source} reason={decision.reason} "
             f"rl_ticks={self.rl_control_ticks} fallback_ticks={self.fallback_ticks} "
-            f"traditional_ticks={self.traditional_ticks}"
+            f"traditional_ticks={self.traditional_ticks} "
+            f"geofence_guard_ticks={self.geofence_guard_ticks} "
+            f"emergency_latch_ticks={self.emergency_latch_ticks} "
+            f"downward_guard_ticks={self.downward_guard_ticks}"
         )
         self.arbiter_publisher.publish(arbiter_message)
         if arbiter_state != self.last_arbiter_state:
             self.get_logger().info(f"arbiter {arbiter_message.data}")
             self.last_arbiter_state = arbiter_state
 
-        command_ned = limit_vector(command_ned, 2.0)
-        # Never allow an avoidance correction to turn into an uncontrolled
-        # climb or descent. The test corridor is deliberately narrow and low.
-        altitude_error = target[2] - current[2]
-        command_ned = (command_ned[0], command_ned[1], -max(-0.8, min(0.8, altitude_error)))
+        self._record_control_sample(
+            current=current,
+            desired_body=desired_body,
+            potential_body=potential_body,
+            rl_body=self.rl_suggested_body,
+            decision=decision,
+        )
         self.maximum_lateral_deviation = max(
             self.maximum_lateral_deviation, abs(current[1] - TAKEOFF_ENU[1])
         )
-        if not (-37.0 <= current[0] <= 1.0 and -29.0 <= current[1] <= -16.0 and 2.0 <= current[2] <= 10.0):
-            self._abort(f"geofence exceeded at ENU {tuple(round(value, 2) for value in current)}")
+        if not ALTITUDE_MIN_ENU <= current[2] <= ALTITUDE_MAX_ENU:
+            self._abort(
+                f"altitude safety range exceeded at ENU "
+                f"{tuple(round(value, 2) for value in current)}"
+            )
             return
         self._publish_velocity_target(command_ned)
 
@@ -539,6 +825,11 @@ class SingleUAVAvoidanceTest(Node):
             failures.append("no measurable lateral detour was produced")
         if self.avoidance_source == "rl" and self.rl_control_ticks < 20:
             failures.append("PPO was not accepted for at least twenty control ticks")
+        if self.maximum_contact_risk_ticks >= 2:
+            failures.append(
+                f"lidar clearance stayed below the {MINIMUM_PASS_CLEARANCE:.2f} m "
+                f"no-contact gate for {self.maximum_contact_risk_ticks} consecutive ticks"
+            )
         if failures:
             self.abort_reason = "; ".join(failures)
         self._command_land()
@@ -572,7 +863,10 @@ class SingleUAVAvoidanceTest(Node):
                     f"minimum_scan={self.minimum_distance:.2f} m, "
                     f"lateral_detour={self.maximum_lateral_deviation:.2f} m, "
                     f"rl_ticks={self.rl_control_ticks}, fallback_ticks={self.fallback_ticks}, "
-                    f"traditional_ticks={self.traditional_ticks}"
+                    f"traditional_ticks={self.traditional_ticks}, "
+                    f"geofence_guard_ticks={self.geofence_guard_ticks}, "
+                    f"emergency_latch_ticks={self.emergency_latch_ticks}, "
+                    f"downward_guard_ticks={self.downward_guard_ticks}"
                 )
             else:
                 self.get_logger().error(f"FAIL: {self.abort_reason}")
@@ -626,6 +920,7 @@ class SingleUAVAvoidanceTest(Node):
                 "z_enu": f"{current[2]:.4f}", "vx_ned": f"{self.position.vx:.4f}",
                 "vy_ned": f"{self.position.vy:.4f}", "vz_ned": f"{self.position.vz:.4f}",
                 "minimum_scan_m": f"{minimum_scan:.4f}",
+                "down_clearance_m": f"{self.down_clearance:.4f}",
                 "desired_forward": f"{desired_body[0]:.4f}",
                 "desired_left": f"{desired_body[1]:.4f}", "desired_up": f"{desired_body[2]:.4f}",
                 "potential_forward": f"{potential_body[0]:.4f}",
@@ -652,6 +947,8 @@ class SingleUAVAvoidanceTest(Node):
             "duration_s": round(time.monotonic() - self.started, 3),
             "path_length_m": round(self.path_length, 3),
             "minimum_scan_m": round(self.minimum_distance, 3),
+            "minimum_down_clearance_m": round(self.minimum_down_clearance, 3),
+            "maximum_contact_risk_ticks": self.maximum_contact_risk_ticks,
             "maximum_lateral_deviation_m": round(self.maximum_lateral_deviation, 3),
             "control_samples": self.control_samples,
             "all_ticks": {
@@ -659,6 +956,9 @@ class SingleUAVAvoidanceTest(Node):
                 "fallback": self.fallback_ticks,
                 "potential": self.traditional_ticks,
             },
+            "geofence_guard_ticks": self.geofence_guard_ticks,
+            "emergency_latch_ticks": self.emergency_latch_ticks,
+            "downward_guard_ticks": self.downward_guard_ticks,
             "within_6m_ticks": self.near_ticks,
             "within_4m_ticks": self.critical_ticks,
             "rl_share_within_6m": round(self.near_ticks["rl"] / near_total, 4) if near_total else 0.0,

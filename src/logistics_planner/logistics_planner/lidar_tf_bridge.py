@@ -88,6 +88,7 @@ class LidarPoseFollower(Node):
         stamp = self.get_clock().now().to_msg()
         for index, sensor_pose in sensor_poses.items():
             self._publish_transform(index, sensor_pose, stamp)
+            self._publish_down_transform(index, stamp)
 
     @staticmethod
     def _sensor_pose(vehicle_pose: Pose, sensor_name: str) -> Pose:
@@ -114,6 +115,17 @@ class LidarPoseFollower(Node):
         transform.transform.rotation.y = pose.orientation.y
         transform.transform.rotation.z = pose.orientation.z
         transform.transform.rotation.w = pose.orientation.w
+        self.tf_broadcaster.sendTransform(transform)
+
+    def _publish_down_transform(self, index: int, stamp) -> None:
+        transform = TransformStamped()
+        transform.header.stamp = stamp
+        transform.header.frame_id = f"uav_{index}/lidar_link"
+        transform.child_frame_id = f"uav_{index}/down_lidar_link"
+        transform.transform.translation.z = -1.0
+        # Gazebo's downward sensor rotates its +X optical axis onto body -Z.
+        transform.transform.rotation.y = math.sin(math.pi / 4.0)
+        transform.transform.rotation.w = math.cos(math.pi / 4.0)
         self.tf_broadcaster.sendTransform(transform)
 
 

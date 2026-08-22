@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from logistics_planner.sector_observation import sectorize_points
+from logistics_planner.sector_observation import minimum_point_distance, sectorize_points
 
 
 def test_sectorize_uses_layer_major_order_and_nearest_distance():
@@ -29,3 +29,16 @@ def test_sector_zero_wraps_around_forward_axis():
     point = (4.0 * math.cos(angle), 4.0 * math.sin(angle), 0.0)
     values = sectorize_points([point], width=1, height=1, sector_count=12)
     assert values[0] == pytest.approx(4.0)
+
+
+def test_downward_cone_reports_nearest_finite_point():
+    points = [
+        (float("nan"), 0.0, 0.0),
+        (0.0, 0.0, 4.0),
+        (0.3, 0.4, 0.0),
+    ]
+    assert minimum_point_distance(points) == pytest.approx(0.5)
+
+
+def test_downward_cone_defaults_to_sensor_range_when_clear():
+    assert minimum_point_distance([(float("nan"),) * 3]) == pytest.approx(15.0)
