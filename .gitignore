@@ -24,7 +24,7 @@ tensorboard/
 !models/ppo_delivery/delivery_model.zip
 
 # Local application documents can contain student contact/funding details.
-reports/
+/reports/
 dist/
 .env
 .env.*
