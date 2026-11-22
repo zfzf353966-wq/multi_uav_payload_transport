@@ -1,0 +1,16 @@
+{
+  "initial_model": "runs/delivery_ppo_v1/training/best_model.zip",
+  "output_dir": "runs/delivery_ppo_v1/training_static",
+  "timesteps": 125000,
+  "static": true,
+  "validation_episodes": 12,
+  "eval_episodes": 40,
+  "seed": 731,
+  "learning_rate": 0.0001,
+  "entropy_coef": 0.005,
+  "static_probability": 0.0,
+  "reward_revision": 2,
+  "evaluate_only": false,
+  "delivery_plan": "runs/delivery_ppo_v1/plan.json",
+  "obstacle_manifest": "runs/delivery_ppo_v1/obstacles.json"
+}

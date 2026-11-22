@@ -22,6 +22,10 @@ class LidarPoseFollower(Node):
     def __init__(self) -> None:
         super().__init__("lidar_pose_follower")
         self.declare_parameter("world", "logistics_city")
+        self.declare_parameter("level_sensors", False)
+        self.declare_parameter("native_follow", False)
+        self.native_follow = bool(self.get_parameter("native_follow").value)
+        self.level_sensors = bool(self.get_parameter("level_sensors").value)
         self.world = str(self.get_parameter("world").value)
         self.gz_subscriber = GazeboNode()
         self.gz_commands = GazeboNode()
@@ -45,12 +49,18 @@ class LidarPoseFollower(Node):
     def _pose_callback(self, message: Pose_V) -> None:
         with self.lock:
             for pose in message.pose:
+                if self.native_follow and pose.name in ("uav_1_lidar", "uav_2_lidar", "uav_3_lidar"):
+                    stored = Pose()
+                    stored.CopyFrom(pose)
+                    self.sensor_poses[int(pose.name.split('_')[1])] = stored
                 if pose.name in ("x500_1", "x500_2", "x500_3"):
                     stored = Pose()
                     stored.CopyFrom(pose)
                     self.model_poses[pose.name] = stored
 
     def _update_sensor_poses(self) -> None:
+        if self.native_follow:
+            return
         with self.lock:
             vehicle_poses = {name: pose for name, pose in self.model_poses.items()}
         sensor_poses: list[tuple[int, Pose]] = []
@@ -59,7 +69,7 @@ class LidarPoseFollower(Node):
             vehicle_pose = vehicle_poses.get(f"x500_{index}")
             if vehicle_pose is None:
                 continue
-            sensor_pose = self._sensor_pose(vehicle_pose, f"uav_{index}_lidar")
+            sensor_pose = self._sensor_pose(vehicle_pose, f"uav_{index}_lidar", self.level_sensors)
             request.pose.add().CopyFrom(sensor_pose)
             sensor_poses.append((index, sensor_pose))
 
@@ -91,13 +101,20 @@ class LidarPoseFollower(Node):
             self._publish_down_transform(index, stamp)
 
     @staticmethod
-    def _sensor_pose(vehicle_pose: Pose, sensor_name: str) -> Pose:
+    def _sensor_pose(vehicle_pose: Pose, sensor_name: str, level: bool = False) -> Pose:
         result = Pose()
         result.name = sensor_name
         result.orientation.CopyFrom(vehicle_pose.orientation)
         # Keep the virtual origin above the rotor disk. Otherwise the -12 deg
         # layer sees the X500's own arms as false obstacles at minimum range.
         offset = rotate_vector((0.0, 0.0, 0.60), vehicle_pose.orientation)
+        if level:
+            q = vehicle_pose.orientation
+            yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+            result.orientation.x = result.orientation.y = 0.0
+            result.orientation.z = math.sin(yaw / 2)
+            result.orientation.w = math.cos(yaw / 2)
+            offset = (0.0, 0.0, .60)
         result.position.x = vehicle_pose.position.x + offset[0]
         result.position.y = vehicle_pose.position.y + offset[1]
         result.position.z = vehicle_pose.position.z + offset[2]

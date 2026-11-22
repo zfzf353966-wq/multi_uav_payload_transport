@@ -20,6 +20,16 @@ tensorboard/
 *.pth
 *.zip
 
+# Ship the one verified delivery policy, not arbitrary training checkpoints.
+!models/ppo_delivery/delivery_model.zip
+
+# Local application documents can contain student contact/funding details.
+reports/
+dist/
+.env
+.env.*
+!.env.example
+
 # Gazebo / runtime logs
 *.ulg
 *.log

@@ -1,0 +1,9 @@
+{
+  "release_date": "2026-11-22",
+  "unit_tests": "126 passed, 3 SWIG warnings (23.93 s)",
+  "model_contract": "PASS: 153 observations, 3 actions, altitude_max=32 and expected SHA-256",
+  "prepare_only": "PASS: fresh tasks, A* legs and seed 1 world generated without starting flight",
+  "shell_syntax": "PASS: run_ppo_delivery.bash",
+  "manual": "DOCX and actual MS Word 97 DOC generated; both render to PDF",
+  "scope": "Documentation, comments, curated assets and default model path reorganized. No new complete Gazebo flight was performed for this release; flight evidence is from 2026-11-01. Fresh-machine installation has not been tested."
+}

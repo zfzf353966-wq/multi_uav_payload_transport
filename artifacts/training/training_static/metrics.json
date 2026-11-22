@@ -1,0 +1,14 @@
+{
+  "episodes": 40,
+  "seed": 3200000,
+  "dynamic": false,
+  "success_rate": 0.925,
+  "collision_rate": 0.0,
+  "outside_rate": 0.0,
+  "timeout_rate": 0.075,
+  "mean_return": 368.36711074963966,
+  "minimum_scan_m": 1.8410871028900146,
+  "full_scan_margin_rate": 1.0,
+  "safe_success_rate": 0.925,
+  "brake_fraction": 0.20349628388987753
+}

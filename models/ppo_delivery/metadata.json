@@ -1,0 +1,15 @@
+{
+  "sha256": "3c9ab4962486ee04c6556c272fba14023d40dd7cdec0dd7b00ea32f6efe8182c",
+  "observation_dimensions": 153,
+  "action_dimensions": 3,
+  "action_frame": "FLU (forward, left, up)",
+  "altitude_limits_m": [
+    2,
+    32
+  ],
+  "selected_refinement_timesteps": 50000,
+  "source": "Hard-case refinement initialized from a previously trained full-height delivery policy; 50000 is not total lifetime training steps.",
+  "current_validation": "artifacts/validation/final_validation.json",
+  "legacy_provenance": "provenance_legacy.json",
+  "payload_mode": "visual cargo; no mass/cable dynamics"
+}

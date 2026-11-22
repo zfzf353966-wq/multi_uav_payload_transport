@@ -79,6 +79,7 @@ class GazeboPackageManager:
         request = Pose()
         request.name = f"package_{task_id.rsplit('_', 1)[-1]}"
         request.position.x, request.position.y, request.position.z = point
+        request.orientation.w = 1.0
         success, response = self._node.request(self._service, request, Pose, Boolean, 100)
         return bool(success and response.data)
 
@@ -322,6 +323,8 @@ class MultiUAVOffboard(Node):
 
             if mission.phase != "tracking" or self.schedule_epoch is None:
                 continue
+            if self._custom_tracking_step(mission,now,mission.namespace in safety_holds):
+                continue
 
             elapsed = max(
                 0.0,
@@ -380,6 +383,10 @@ class MultiUAVOffboard(Node):
             # A shared virtual clock preserves all offline separation guarantees
             # when any vehicle needs extra time to catch its reference.
             self.schedule_time_shift += schedule_tick_duration
+
+    def _custom_tracking_step(self, mission: VehicleMission, now: float, must_hold: bool) -> bool:
+        """Extensions may handle an actual-position tracking tick here."""
+        return False
 
     def _abort_all(self, reason: str) -> None:
         """Land the fleet instead of allowing an unrecoverable shared-clock stall."""

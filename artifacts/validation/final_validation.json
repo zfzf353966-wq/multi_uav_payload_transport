@@ -1,0 +1,112 @@
+{
+  "date": "2026-11-01",
+  "status": "two complete final-controller runs, including GUI; not a statistical all-seed guarantee",
+  "tests": "126 passed, 3 SWIG warnings",
+  "runs": [
+    {
+      "path": "runs/delivery_stable_v2_seed2b",
+      "mode": "headless",
+      "seed": 2,
+      "success": true,
+      "delivered": 6,
+      "returned_home": 3,
+      "delivery_point_counts": {
+        "delivery_1": 2,
+        "delivery_2": 2,
+        "delivery_3": 2
+      },
+      "destination_owners": {
+        "delivery_2": [
+          "uav_1"
+        ],
+        "delivery_3": [
+          "uav_2"
+        ],
+        "delivery_1": [
+          "uav_3"
+        ]
+      },
+      "control_minimum_separation_m": 3.508640126953427,
+      "sampled_gazebo_minimum_separation_m": 3.4599218318516223,
+      "estimated_landing_xy_errors_m": [
+        0.029514864469401773,
+        0.03029942063315163,
+        0.07914146886775762
+      ],
+      "gazebo_final_xy_errors_m": [
+        0.06544737360978065,
+        0.0009933223768425824,
+        0.07115114435068172
+      ],
+      "minimum_cruise_body_clearance_m": 1.240097520307589,
+      "ppo_ticks": [
+        168,
+        379,
+        186
+      ],
+      "communication_holds": 1,
+      "model_sha256": "3c9ab4962486ee04c6556c272fba14023d40dd7cdec0dd7b00ea32f6efe8182c"
+    },
+    {
+      "path": "runs/delivery_stable_v2_seed1_gui",
+      "mode": "gui",
+      "seed": 1,
+      "success": true,
+      "delivered": 6,
+      "returned_home": 3,
+      "delivery_point_counts": {
+        "delivery_1": 2,
+        "delivery_2": 2,
+        "delivery_3": 2
+      },
+      "destination_owners": {
+        "delivery_2": [
+          "uav_1"
+        ],
+        "delivery_3": [
+          "uav_2"
+        ],
+        "delivery_1": [
+          "uav_3"
+        ]
+      },
+      "control_minimum_separation_m": 3.599382743581019,
+      "sampled_gazebo_minimum_separation_m": 3.5367966768051815,
+      "estimated_landing_xy_errors_m": [
+        0.2495855578343811,
+        0.07318307369494284,
+        0.06644578153750756
+      ],
+      "gazebo_final_xy_errors_m": [
+        0.22310635713746993,
+        0.040164602651288954,
+        0.05196691707463511
+      ],
+      "minimum_cruise_body_clearance_m": 1.0402340642210863,
+      "ppo_ticks": [
+        407,
+        336,
+        145
+      ],
+      "communication_holds": 1,
+      "model_sha256": "3c9ab4962486ee04c6556c272fba14023d40dd7cdec0dd7b00ea32f6efe8182c"
+    }
+  ],
+  "source_sha256": {
+    "delivery_control.py": "b2b27766cbc9731aef5ba8d8876b9e04fee896c2d1bf2b4ed4588ab516464e74",
+    "delivery_ppo_mission.py": "51b631dc4e4b1ef7657c48bc053c8fc58c1043fa0ecd1b68d242b7c4bcd53f52",
+    "delivery_plan.py": "0eaaff1f42de25465a29cbc6ba66c1fd66ab4949d6c65dd4fda82677bb13f173",
+    "task_generator.py": "efcfb1c8fa5a42b58220bfb5933a1f4a9ccb66078047e2109e24fe53c3dd7f3e",
+    "allocator.py": "aaabefa495f5d9ca934663ea47cd33d8ee6f4add75106531262c2d55c582d6e0",
+    "config.py": "9526e5c19f842274fc2b57727835c86e8f93b2d71c50d9fa3b3fc041cf23c0ae",
+    "city_dynamic_obstacles.py": "8c5e10029baa7a52717e93b0873108b085936e111dd0bdb2fa8a1d97a505f56f",
+    "direct_ppo_inference.py": "78e55448d0df012ee4aea75de93bbd58a1e018b2ffd8b5cd5e0a4b6e19d13349",
+    "direct_ppo_contract.py": "99e21cb5cede37c7ac2bc913c8703dcef61ffb5f6e0667815093e94e556fca8c",
+    "trajectory.py": "8097d0de3ede4a48130ac629c39b58aebd901470c250f6ccd3a7f436c9693dcc"
+  },
+  "earlier_runs_not_accepted": [
+    "runs/delivery_stable_v2_seed1c (development stop: roof-marker classification)",
+    "runs/delivery_stable_v2_seed1d (proximity abort)",
+    "runs/delivery_stable_v2_seed2 (fleet separation criterion failed)"
+  ]
+}

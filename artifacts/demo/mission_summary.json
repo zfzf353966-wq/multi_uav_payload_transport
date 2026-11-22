@@ -1,0 +1,101 @@
+{
+  "success": true,
+  "abort_reason": null,
+  "delivered": [
+    "task_1",
+    "task_2",
+    "task_3",
+    "task_4",
+    "task_5",
+    "task_6"
+  ],
+  "expected_tasks": 6,
+  "landed": [
+    true,
+    true,
+    true
+  ],
+  "max_concurrent_airborne": 3,
+  "returned_home": [
+    true,
+    true,
+    true
+  ],
+  "landing_home_xy_error_m": [
+    0.02746609746760128,
+    0.09590862785510608,
+    0.02999368862604861
+  ],
+  "delivered_by_destination": {
+    "delivery_1": 2,
+    "delivery_2": 2,
+    "delivery_3": 2
+  },
+  "minimum_actual_separation": 3.482555964621184,
+  "ppo_ticks": [
+    403,
+    120,
+    143
+  ],
+  "brake_ticks": [
+    92,
+    127,
+    0
+  ],
+  "potential_field_used": false,
+  "projected_ticks": [
+    469,
+    376,
+    110
+  ],
+  "geometry_audit": {
+    "method": "cruise timestamps matched to sampled Gazebo root poses; UAV radius .45 m; exact building boxes/crowns, conservative trunk boxes; takeoff and landing contact excluded",
+    "samples": [
+      4231,
+      3878,
+      3252
+    ],
+    "minimum_clearance_m": [
+      1.00513507789423,
+      1.2854945641799138,
+      1.5330826427871411
+    ],
+    "passed": true
+  },
+  "communication_holds": [
+    {
+      "elapsed_s": 46.377152084000045,
+      "stale_ages_s": {
+        "uav_1:sectors": 0.7741024580000158,
+        "uav_1:down": 0.7739667820000022,
+        "uav_1:telemetry": 0.6641827720000038,
+        "uav_1:cloud": 0.7440537480000557,
+        "uav_1:command": 0.6319415450000179,
+        "uav_2:sectors": 0.687861206999969,
+        "uav_2:down": 0.6877778409999564,
+        "uav_2:telemetry": 0.6705160699999624,
+        "uav_2:cloud": 0.6773722159999807,
+        "uav_3:sectors": 0.6639840120000144,
+        "uav_3:down": 0.6573762839999517,
+        "uav_3:telemetry": 0.6638958539999749,
+        "uav_3:cloud": 0.814364415,
+        "uav_3:command": 0.6580245799999602
+      },
+      "duration_s": 0.07313080799997351
+    }
+  ],
+  "onboard_tasks": [
+    [],
+    [],
+    []
+  ],
+  "package_destination_verified": {
+    "task_1": true,
+    "task_2": true,
+    "task_3": true,
+    "task_4": true,
+    "task_5": true,
+    "task_6": true
+  },
+  "payload_mode": "visual packages follow UAV; mass and cable dynamics not simulated"
+}

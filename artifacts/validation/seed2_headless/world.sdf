@@ -1,0 +1,1417 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.9">
+  <world name="logistics_delivery_ppo">
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics" />
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands" />
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster" />
+    <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact" />
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu" />
+    <plugin filename="gz-sim-air-pressure-system" name="gz::sim::systems::AirPressure" />
+    <plugin filename="gz-sim-air-speed-system" name="gz::sim::systems::AirSpeed" />
+    <plugin filename="gz-sim-apply-link-wrench-system" name="gz::sim::systems::ApplyLinkWrench" />
+    <plugin filename="gz-sim-navsat-system" name="gz::sim::systems::NavSat" />
+    <plugin filename="gz-sim-magnetometer-system" name="gz::sim::systems::Magnetometer" />
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <physics name="fast_urban_physics" type="ode">
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>250</real_time_update_rate>
+    </physics>
+    <gravity>0 0 -9.8</gravity>
+    <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
+    <atmosphere type="adiabatic" />
+    <scene>
+      <grid>false</grid>
+      <ambient>0.45 0.45 0.45 1</ambient>
+      <background>0.64 0.78 0.92 1</background>
+      <shadows>true</shadows>
+    </scene>
+    <light name="sun" type="directional">
+      <pose>0 0 100 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <intensity>0.9</intensity>
+      <direction>-0.35 0.25 -0.9</direction>
+      <diffuse>0.95 0.92 0.85 1</diffuse>
+      <specular>0.25 0.25 0.25 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>1</constant>
+        <linear>0</linear>
+        <quadratic>0</quadratic>
+      </attenuation>
+    </light>
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>47.397971</latitude_deg>
+      <longitude_deg>8.546164</longitude_deg>
+      <elevation>0</elevation>
+    </spherical_coordinates>
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>80 60</size>
+            </plane>
+          </geometry>
+          <surface>
+            <friction>
+              <ode>
+                <mu>1</mu>
+                <mu2>1</mu2>
+              </ode>
+            </friction>
+          </surface>
+        </collision>
+        <visual name="grass">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>80 60</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.18 0.34 0.16 1</ambient>
+            <diffuse>0.24 0.46 0.21 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="roads">
+      <static>true</static>
+      <link name="link">
+        <visual name="east_west_road">
+          <pose>0 0 0.012 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>80 7 0.02</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.09 0.10 0.11 1</ambient>
+            <diffuse>0.16 0.17 0.18 1</diffuse>
+          </material>
+        </visual>
+        <visual name="north_south_road">
+          <pose>10 0 0.014 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>7 60 0.02</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.09 0.10 0.11 1</ambient>
+            <diffuse>0.16 0.17 0.18 1</diffuse>
+          </material>
+        </visual>
+        <visual name="depot_access_road">
+          <pose>-25 -22 0.016 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>30 6 0.02</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.09 0.10 0.11 1</ambient>
+            <diffuse>0.16 0.17 0.18 1</diffuse>
+          </material>
+        </visual>
+        <visual name="lane_line_x">
+          <pose>0 0 0.03 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>80 0.12 0.02</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.9 0.8 0.15 1</ambient>
+            <diffuse>0.95 0.85 0.2 1</diffuse>
+          </material>
+        </visual>
+        <visual name="lane_line_y">
+          <pose>10 0 0.032 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.12 60 0.02</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.9 0.8 0.15 1</ambient>
+            <diffuse>0.95 0.85 0.2 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="uav_depot">
+      <static>true</static>
+      <pose>-30 -23 0.055 0 0 0</pose>
+      <link name="link">
+        <collision name="apron_collision">
+          <geometry>
+            <box>
+              <size>10 6 0.1</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="apron_visual">
+          <geometry>
+            <box>
+              <size>10 6 0.1</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.35 0.37 0.39 1</ambient>
+            <diffuse>0.55 0.57 0.59 1</diffuse>
+          </material>
+        </visual>
+        <visual name="pad_1">
+          <pose>-4 0 0.051 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.9</radius>
+              <length>0.002</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.1 0.55 0.85 1</ambient>
+            <diffuse>0.15 0.7 1 1</diffuse>
+          </material>
+        </visual>
+        <visual name="pad_2">
+          <pose>0 0 0.051 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.9</radius>
+              <length>0.002</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.1 0.55 0.85 1</ambient>
+            <diffuse>0.15 0.7 1 1</diffuse>
+          </material>
+        </visual>
+        <visual name="pad_3">
+          <pose>4 0 0.051 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>0.9</radius>
+              <length>0.002</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.1 0.55 0.85 1</ambient>
+            <diffuse>0.15 0.7 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="uav_1_lidar">
+      <static>true</static>
+      <pose>-34 -23 0.73 0 0 0</pose>
+      <link name="lidar_link">
+        <sensor name="scan" type="gpu_lidar">
+          <gz_frame_id>uav_1/lidar_link</gz_frame_id>
+          <topic>/mupt/uav_1/scan</topic>
+          <update_rate>10</update_rate>
+          <always_on>true</always_on>
+          <visualize>false</visualize>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>120</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159265</min_angle>
+                <max_angle>3.14159265</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>3</samples>
+                <resolution>1</resolution>
+                <min_angle>-0.20943951</min_angle>
+                <max_angle>0.20943951</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>0.6</min>
+              <max>20</max>
+              <resolution>0.02</resolution>
+            </range>
+            <noise>
+              <type>gaussian</type>
+              <mean>0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+            <visibility_mask>4294967293</visibility_mask>
+          </ray>
+        </sensor>
+        <sensor name="down_scan" type="gpu_lidar">
+          <pose>0 0 -1.0 0 1.57079633 0</pose>
+          <gz_frame_id>uav_1/down_lidar_link</gz_frame_id>
+          <topic>/mupt/uav_1/down_scan</topic>
+          <update_rate>10</update_rate>
+          <always_on>true</always_on>
+          <visualize>false</visualize>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>5</samples>
+                <resolution>1</resolution>
+                <min_angle>-0.261799</min_angle>
+                <max_angle>0.261799</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>5</samples>
+                <resolution>1</resolution>
+                <min_angle>-0.261799</min_angle>
+                <max_angle>0.261799</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>0.3</min>
+              <max>15</max>
+              <resolution>0.02</resolution>
+            </range>
+            <visibility_mask>4294967293</visibility_mask>
+          </ray>
+        </sensor>
+        <sensor name="safety_scan" type="gpu_lidar">
+          <gz_frame_id>uav_1/lidar_link</gz_frame_id>
+          <topic>/mupt/uav_1/safety_scan</topic>
+          <update_rate>10</update_rate>
+          <always_on>true</always_on>
+          <visualize>false</visualize>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>120</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159265</min_angle>
+                <max_angle>3.14159265</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>11</samples>
+                <resolution>1</resolution>
+                <min_angle>-1.0471975511965976</min_angle>
+                <max_angle>1.0471975511965976</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>.9</min>
+              <max>8</max>
+              <resolution>0.02</resolution>
+            </range>
+            <noise>
+              <type>gaussian</type>
+              <mean>0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+            <visibility_mask>4294967293</visibility_mask>
+          </ray>
+        </sensor>
+      </link>
+    </model>
+    <model name="uav_2_lidar">
+      <static>true</static>
+      <pose>-30 -23 0.73 0 0 0</pose>
+      <link name="lidar_link">
+        <sensor name="scan" type="gpu_lidar">
+          <gz_frame_id>uav_2/lidar_link</gz_frame_id>
+          <topic>/mupt/uav_2/scan</topic>
+          <update_rate>10</update_rate>
+          <always_on>true</always_on>
+          <visualize>false</visualize>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>120</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159265</min_angle>
+                <max_angle>3.14159265</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>3</samples>
+                <resolution>1</resolution>
+                <min_angle>-0.20943951</min_angle>
+                <max_angle>0.20943951</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>0.6</min>
+              <max>20</max>
+              <resolution>0.02</resolution>
+            </range>
+            <noise>
+              <type>gaussian</type>
+              <mean>0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+            <visibility_mask>4294967293</visibility_mask>
+          </ray>
+        </sensor>
+        <sensor name="down_scan" type="gpu_lidar">
+          <pose>0 0 -1.0 0 1.57079633 0</pose>
+          <gz_frame_id>uav_2/down_lidar_link</gz_frame_id>
+          <topic>/mupt/uav_2/down_scan</topic>
+          <update_rate>10</update_rate>
+          <always_on>true</always_on>
+          <visualize>false</visualize>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>5</samples>
+                <resolution>1</resolution>
+                <min_angle>-0.261799</min_angle>
+                <max_angle>0.261799</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>5</samples>
+                <resolution>1</resolution>
+                <min_angle>-0.261799</min_angle>
+                <max_angle>0.261799</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>0.3</min>
+              <max>15</max>
+              <resolution>0.02</resolution>
+            </range>
+            <visibility_mask>4294967293</visibility_mask>
+          </ray>
+        </sensor>
+        <sensor name="safety_scan" type="gpu_lidar">
+          <gz_frame_id>uav_2/lidar_link</gz_frame_id>
+          <topic>/mupt/uav_2/safety_scan</topic>
+          <update_rate>10</update_rate>
+          <always_on>true</always_on>
+          <visualize>false</visualize>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>120</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159265</min_angle>
+                <max_angle>3.14159265</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>11</samples>
+                <resolution>1</resolution>
+                <min_angle>-1.0471975511965976</min_angle>
+                <max_angle>1.0471975511965976</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>.9</min>
+              <max>8</max>
+              <resolution>0.02</resolution>
+            </range>
+            <noise>
+              <type>gaussian</type>
+              <mean>0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+            <visibility_mask>4294967293</visibility_mask>
+          </ray>
+        </sensor>
+      </link>
+    </model>
+    <model name="uav_3_lidar">
+      <static>true</static>
+      <pose>-26 -23 0.73 0 0 0</pose>
+      <link name="lidar_link">
+        <sensor name="scan" type="gpu_lidar">
+          <gz_frame_id>uav_3/lidar_link</gz_frame_id>
+          <topic>/mupt/uav_3/scan</topic>
+          <update_rate>10</update_rate>
+          <always_on>true</always_on>
+          <visualize>false</visualize>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>120</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159265</min_angle>
+                <max_angle>3.14159265</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>3</samples>
+                <resolution>1</resolution>
+                <min_angle>-0.20943951</min_angle>
+                <max_angle>0.20943951</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>0.6</min>
+              <max>20</max>
+              <resolution>0.02</resolution>
+            </range>
+            <noise>
+              <type>gaussian</type>
+              <mean>0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+            <visibility_mask>4294967293</visibility_mask>
+          </ray>
+        </sensor>
+        <sensor name="down_scan" type="gpu_lidar">
+          <pose>0 0 -1.0 0 1.57079633 0</pose>
+          <gz_frame_id>uav_3/down_lidar_link</gz_frame_id>
+          <topic>/mupt/uav_3/down_scan</topic>
+          <update_rate>10</update_rate>
+          <always_on>true</always_on>
+          <visualize>false</visualize>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>5</samples>
+                <resolution>1</resolution>
+                <min_angle>-0.261799</min_angle>
+                <max_angle>0.261799</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>5</samples>
+                <resolution>1</resolution>
+                <min_angle>-0.261799</min_angle>
+                <max_angle>0.261799</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>0.3</min>
+              <max>15</max>
+              <resolution>0.02</resolution>
+            </range>
+            <visibility_mask>4294967293</visibility_mask>
+          </ray>
+        </sensor>
+        <sensor name="safety_scan" type="gpu_lidar">
+          <gz_frame_id>uav_3/lidar_link</gz_frame_id>
+          <topic>/mupt/uav_3/safety_scan</topic>
+          <update_rate>10</update_rate>
+          <always_on>true</always_on>
+          <visualize>false</visualize>
+          <ray>
+            <scan>
+              <horizontal>
+                <samples>120</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159265</min_angle>
+                <max_angle>3.14159265</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>11</samples>
+                <resolution>1</resolution>
+                <min_angle>-1.0471975511965976</min_angle>
+                <max_angle>1.0471975511965976</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>.9</min>
+              <max>8</max>
+              <resolution>0.02</resolution>
+            </range>
+            <noise>
+              <type>gaussian</type>
+              <mean>0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+            <visibility_mask>4294967293</visibility_mask>
+          </ray>
+        </sensor>
+      </link>
+    </model>
+    <model name="building_1">
+      <static>true</static>
+      <pose>-21 -11 6 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>12 10 12</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="body">
+          <geometry>
+            <box>
+              <size>12 10 12</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.52 0.30 0.22 1</ambient>
+            <diffuse>0.72 0.43 0.32 1</diffuse>
+          </material>
+        </visual>
+        <visual name="roof">
+          <pose>0 0 6.08 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>12.4 10.4 0.16</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.24 0.25 0.27 1</ambient>
+            <diffuse>0.36 0.38 0.40 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="building_2">
+      <static>true</static>
+      <pose>0 -12 9 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>10 12 18</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="body">
+          <geometry>
+            <box>
+              <size>10 12 18</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.28 0.40 0.52 1</ambient>
+            <diffuse>0.38 0.55 0.70 1</diffuse>
+          </material>
+        </visual>
+        <visual name="roof">
+          <pose>0 0 9.08 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>10.4 12.4 0.16</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.22 0.23 0.25 1</ambient>
+            <diffuse>0.34 0.35 0.37 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="building_3">
+      <static>true</static>
+      <pose>21 -11 4.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>14 10 9</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="body">
+          <geometry>
+            <box>
+              <size>14 10 9</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.47 0.45 0.32 1</ambient>
+            <diffuse>0.69 0.66 0.46 1</diffuse>
+          </material>
+        </visual>
+        <visual name="roof">
+          <pose>0 0 4.58 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>14.4 10.4 0.16</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.24 0.25 0.27 1</ambient>
+            <diffuse>0.36 0.38 0.40 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="building_4">
+      <static>true</static>
+      <pose>-21 12 10 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>10 14 20</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="body">
+          <geometry>
+            <box>
+              <size>10 14 20</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.31 0.46 1</ambient>
+            <diffuse>0.64 0.44 0.65 1</diffuse>
+          </material>
+        </visual>
+        <visual name="roof">
+          <pose>0 0 10.08 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>10.4 14.4 0.16</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.22 0.23 0.25 1</ambient>
+            <diffuse>0.34 0.35 0.37 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="building_5">
+      <static>true</static>
+      <pose>0 13 7 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>14 10 14</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="body">
+          <geometry>
+            <box>
+              <size>14 10 14</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.25 0.46 0.43 1</ambient>
+            <diffuse>0.34 0.65 0.60 1</diffuse>
+          </material>
+        </visual>
+        <visual name="roof">
+          <pose>0 0 7.08 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>14.4 10.4 0.16</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.24 0.25 0.27 1</ambient>
+            <diffuse>0.36 0.38 0.40 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="building_6">
+      <static>true</static>
+      <pose>21 13 11.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>12 14 23</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="body">
+          <geometry>
+            <box>
+              <size>12 14 23</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.45 0.36 0.25 1</ambient>
+            <diffuse>0.66 0.53 0.36 1</diffuse>
+          </material>
+        </visual>
+        <visual name="roof">
+          <pose>0 0 11.58 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>12.4 14.4 0.16</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.22 0.23 0.25 1</ambient>
+            <diffuse>0.34 0.35 0.37 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="pickup_pads">
+      <static>true</static>
+      <link name="link">
+        <visual name="pickup_1">
+          <pose>-21 -11 12.18 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>3 3 0.12</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.85 0.58 0.04 1</ambient>
+            <diffuse>1 0.72 0.06 1</diffuse>
+          </material>
+        </visual>
+        <visual name="pickup_2">
+          <pose>0 -12 18.18 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>3 3 0.12</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.85 0.58 0.04 1</ambient>
+            <diffuse>1 0.72 0.06 1</diffuse>
+          </material>
+        </visual>
+        <visual name="pickup_3">
+          <pose>0 13 14.18 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>3 3 0.12</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.85 0.58 0.04 1</ambient>
+            <diffuse>1 0.72 0.06 1</diffuse>
+          </material>
+        </visual>
+        <visual name="delivery_1">
+          <pose>21 -11 9.18 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>1.5</radius>
+              <length>0.12</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.03 0.45 0.82 1</ambient>
+            <diffuse>0.05 0.62 1 1</diffuse>
+          </material>
+        </visual>
+        <visual name="delivery_2">
+          <pose>-21 12 20.18 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>1.5</radius>
+              <length>0.12</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.03 0.45 0.82 1</ambient>
+            <diffuse>0.05 0.62 1 1</diffuse>
+          </material>
+        </visual>
+        <visual name="delivery_3">
+          <pose>21 13 23.18 0 0 0</pose>
+          <geometry>
+            <cylinder>
+              <radius>1.5</radius>
+              <length>0.12</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.03 0.45 0.82 1</ambient>
+            <diffuse>0.05 0.62 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="package_1">
+      <static>true</static>
+      <link name="package_link">
+        <visual name="box_visual">
+          <geometry>
+            <box>
+              <size>0.55 0.55 0.45</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.62 0.31 0.06 1</ambient>
+            <diffuse>0.88 0.48 0.10 1</diffuse>
+          </material>
+          <visibility_flags>2</visibility_flags>
+        </visual>
+        <visual name="tape_visual">
+          <pose>0 0 0.226 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.12 0.56 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.85 0.25 1</ambient>
+            <diffuse>1 0.92 0.30 1</diffuse>
+          </material>
+          <visibility_flags>2</visibility_flags>
+        </visual>
+      </link>
+      <pose>-0.45 12.55 14.48 0 0 0</pose>
+    </model>
+    <model name="package_2">
+      <static>true</static>
+      <link name="package_link">
+        <visual name="box_visual">
+          <geometry>
+            <box>
+              <size>0.55 0.55 0.45</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.62 0.31 0.06 1</ambient>
+            <diffuse>0.88 0.48 0.10 1</diffuse>
+          </material>
+          <visibility_flags>2</visibility_flags>
+        </visual>
+        <visual name="tape_visual">
+          <pose>0 0 0.226 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.12 0.56 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.85 0.25 1</ambient>
+            <diffuse>1 0.92 0.30 1</diffuse>
+          </material>
+          <visibility_flags>2</visibility_flags>
+        </visual>
+      </link>
+      <pose>-21.45 -11 12.48 0 0 0</pose>
+    </model>
+    <model name="package_3">
+      <static>true</static>
+      <link name="package_link">
+        <visual name="box_visual">
+          <geometry>
+            <box>
+              <size>0.55 0.55 0.45</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.62 0.31 0.06 1</ambient>
+            <diffuse>0.88 0.48 0.10 1</diffuse>
+          </material>
+          <visibility_flags>2</visibility_flags>
+        </visual>
+        <visual name="tape_visual">
+          <pose>0 0 0.226 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.12 0.56 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.85 0.25 1</ambient>
+            <diffuse>1 0.92 0.30 1</diffuse>
+          </material>
+          <visibility_flags>2</visibility_flags>
+        </visual>
+      </link>
+      <pose>0 -12 18.48 0 0 0</pose>
+    </model>
+    <model name="package_4">
+      <static>true</static>
+      <link name="package_link">
+        <visual name="box_visual">
+          <geometry>
+            <box>
+              <size>0.55 0.55 0.45</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.62 0.31 0.06 1</ambient>
+            <diffuse>0.88 0.48 0.10 1</diffuse>
+          </material>
+          <visibility_flags>2</visibility_flags>
+        </visual>
+        <visual name="tape_visual">
+          <pose>0 0 0.226 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.12 0.56 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.85 0.25 1</ambient>
+            <diffuse>1 0.92 0.30 1</diffuse>
+          </material>
+          <visibility_flags>2</visibility_flags>
+        </visual>
+      </link>
+      <pose>-20.55 -11 12.48 0 0 0</pose>
+    </model>
+    <model name="package_5">
+      <static>true</static>
+      <link name="package_link">
+        <visual name="box_visual">
+          <geometry>
+            <box>
+              <size>0.55 0.55 0.45</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.62 0.31 0.06 1</ambient>
+            <diffuse>0.88 0.48 0.10 1</diffuse>
+          </material>
+          <visibility_flags>2</visibility_flags>
+        </visual>
+        <visual name="tape_visual">
+          <pose>0 0 0.226 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.12 0.56 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.85 0.25 1</ambient>
+            <diffuse>1 0.92 0.30 1</diffuse>
+          </material>
+          <visibility_flags>2</visibility_flags>
+        </visual>
+      </link>
+      <pose>0.45 12.55 14.48 0 0 0</pose>
+    </model>
+    <model name="package_6">
+      <static>true</static>
+      <link name="package_link">
+        <visual name="box_visual">
+          <geometry>
+            <box>
+              <size>0.55 0.55 0.45</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.62 0.31 0.06 1</ambient>
+            <diffuse>0.88 0.48 0.10 1</diffuse>
+          </material>
+          <visibility_flags>2</visibility_flags>
+        </visual>
+        <visual name="tape_visual">
+          <pose>0 0 0.226 0 0 0</pose>
+          <geometry>
+            <box>
+              <size>0.12 0.56 0.012</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.95 0.85 0.25 1</ambient>
+            <diffuse>1 0.92 0.30 1</diffuse>
+          </material>
+          <visibility_flags>2</visibility_flags>
+        </visual>
+      </link>
+      <pose>0 13.45 14.48 0 0 0</pose>
+    </model>
+    <model name="moving_obstacle_1">
+      <pose>10 0 8 0 0 0</pose>
+      <link name="anchor_link">
+        <inertial>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>1</iyy>
+            <iyz>0</iyz>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
+      </link>
+      <link name="sphere_link">
+        <pose>4 0 0 0 0 0</pose>
+        <gravity>false</gravity>
+        <inertial>
+          <mass>0.5</mass>
+          <inertia>
+            <ixx>0.04</ixx>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyy>0.04</iyy>
+            <iyz>0</iyz>
+            <izz>0.04</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry>
+            <sphere>
+              <radius>0.45</radius>
+            </sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere>
+              <radius>0.45</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0.75 0.03 0.03 1</ambient>
+            <diffuse>1 0.06 0.06 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <joint name="anchor_to_world" type="fixed">
+        <parent>world</parent>
+        <child>anchor_link</child>
+      </joint>
+      <joint name="orbit_joint" type="revolute">
+        <pose relative_to="__model__">0 0 0 0 0 0</pose>
+        <parent>anchor_link</parent>
+        <child>sphere_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+        </axis>
+      </joint>
+      <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+        <joint_name>orbit_joint</joint_name>
+        <initial_velocity>0.5</initial_velocity>
+      </plugin>
+    </model>
+    <include>
+      <uri>model://simple_tree</uri>
+      <name>tree_1</name>
+      <pose>-37 -10 0 0 0 0</pose>
+    </include>
+    <include>
+      <uri>model://simple_tree</uri>
+      <name>tree_2</name>
+      <pose>-36 10 0 0 0 0</pose>
+    </include>
+    <include>
+      <uri>model://simple_tree</uri>
+      <name>tree_3</name>
+      <pose>-10 -25 0 0 0 0</pose>
+    </include>
+    <include>
+      <uri>model://simple_tree</uri>
+      <name>tree_4</name>
+      <pose>11 -25 0 0 0 0</pose>
+    </include>
+    <include>
+      <uri>model://simple_tree</uri>
+      <name>tree_5</name>
+      <pose>36 -5 0 0 0 0</pose>
+    </include>
+    <include>
+      <uri>model://simple_tree</uri>
+      <name>tree_6</name>
+      <pose>35 5 0 0 0 0</pose>
+    </include>
+    <plugin name="mupt::SensorFollower" filename="libmupt_sensor_follower.so" />
+    <plugin name="mupt::CityObstacles" filename="libmupt_city_obstacles.so">
+      <obstacle>
+        <name>city_dynamic_1</name>
+        <center>-23.0 -15.8 15.6</center>
+        <amplitude>1.0432290794918815 1.0432290794918815 0.47171417031806373</amplitude>
+        <rate>0.3928359095486089 0.3928359095486089 0.30378819967151993</rate>
+        <phase>0.06952956254200426 0.06952956254200426 2.4580412138044405</phase>
+      </obstacle>
+      <obstacle>
+        <name>city_dynamic_2</name>
+        <center>-25.8 -18.8 12.95</center>
+        <amplitude>0.837317762254517 0.837317762254517 0.37509268444862975</amplitude>
+        <rate>-0.2950222708632281 -0.2950222708632281 0.4105848429157969</rate>
+        <phase>-0.27375448271994385 -0.27375448271994385 2.499037349179445</phase>
+      </obstacle>
+      <obstacle>
+        <name>city_dynamic_3</name>
+        <center>-8.109320654539328 -15.913002175902852 29.39461170322013</center>
+        <amplitude>1.5104744132940375 1.5104744132940375 0.4775104427793767</amplitude>
+        <rate>-0.3484943291273656 -0.3484943291273656 0.25153310452455035</rate>
+        <phase>-2.0030403553657967 -2.0030403553657967 0.6522293008675311</phase>
+      </obstacle>
+      <obstacle>
+        <name>city_dynamic_4</name>
+        <center>6.491618508450866 -23.581874274414147 26.158930176333673</center>
+        <amplitude>0.919293341519169 0.919293341519169 0.6776094135610378</amplitude>
+        <rate>0.27912859782138766 0.27912859782138766 0.48120294311869044</rate>
+        <phase>1.5732882026711401 1.5732882026711401 0.4678868053753704</phase>
+      </obstacle>
+      <obstacle>
+        <name>city_dynamic_5</name>
+        <center>-14.864563762136218 13.637581323746584 29.18952160413316</center>
+        <amplitude>1.0719512760309642 1.0719512760309642 0.3773076628946459</amplitude>
+        <rate>-0.33158597017268504 -0.33158597017268504 0.28884499993512014</rate>
+        <phase>2.683969012228209 2.683969012228209 1.7879737311438282</phase>
+      </obstacle>
+      <obstacle>
+        <name>city_dynamic_6</name>
+        <center>32.81796870414037 4.248132174153952 11.80837354056452</center>
+        <amplitude>1.4756278199070896 1.4756278199070896 0.646868079098948</amplitude>
+        <rate>0.3495452504864755 0.3495452504864755 0.400607227565052</rate>
+        <phase>2.5341841048313016 2.5341841048313016 2.3057591326564184</phase>
+      </obstacle>
+      <obstacle>
+        <name>city_dynamic_7</name>
+        <center>-9.393582122034012 -22.89262498909243 29.462639345720312</center>
+        <amplitude>1.5375535389813884 1.5375535389813884 0.753490154968089</amplitude>
+        <rate>-0.198945479344319 -0.198945479344319 0.31569203506509186</rate>
+        <phase>-0.33550025825228014 -0.33550025825228014 1.9137644089563945</phase>
+      </obstacle>
+      <obstacle>
+        <name>city_dynamic_8</name>
+        <center>28.544960299858136 -12.517473416213539 25.22637539325223</center>
+        <amplitude>1.2872059149116652 1.2872059149116652 0.3785919998366581</amplitude>
+        <rate>-0.3943860042100503 -0.3943860042100503 0.4648077958528101</rate>
+        <phase>0.373077872363615 0.373077872363615 1.3423336203603995</phase>
+      </obstacle>
+      <obstacle>
+        <name>city_dynamic_9</name>
+        <center>-8.633095148646323 5.470137660448073 29.259051093765787</center>
+        <amplitude>1.9326929197125042 1.9326929197125042 0.8032601739286296</amplitude>
+        <rate>-0.23382522105237935 -0.23382522105237935 0.22607483004432605</rate>
+        <phase>-0.1887099402010497 -0.1887099402010497 0.5560041175661103</phase>
+      </obstacle>
+      <obstacle>
+        <name>city_dynamic_10</name>
+        <center>22.420747813665166 17.548704957602826 27.50177157902314</center>
+        <amplitude>1.0895002518889112 1.0895002518889112 0.7197382959979267</amplitude>
+        <rate>0.213702749813301 0.213702749813301 0.4881586282761664</rate>
+        <phase>1.3226456026243136 1.3226456026243136 1.4981787309738381</phase>
+      </obstacle>
+    </plugin>
+    <plugin name="mupt::PackageFollower" filename="libmupt_package_follower.so" />
+    <model name="city_dynamic_1">
+      <static>true</static>
+      <pose>-21.959291577283867 -15.72752316794189 15.8979113463065 0 0 0</pose>
+      <link name="sphere">
+        <collision name="collision">
+          <geometry>
+            <sphere>
+              <radius>0.5479062082700066</radius>
+            </sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere>
+              <radius>0.5479062082700066</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0.95 0.2 0.08 1</ambient>
+            <diffuse>0.95 0.2 0.08 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="city_dynamic_2">
+      <static>true</static>
+      <pose>-24.99386171772389 -19.026367190281267 13.174771698606241 0 0 0</pose>
+      <link name="sphere">
+        <collision name="collision">
+          <geometry>
+            <sphere>
+              <radius>0.4751759005046192</radius>
+            </sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere>
+              <radius>0.4751759005046192</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0.95 0.2 0.08 1</ambient>
+            <diffuse>0.95 0.2 0.08 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="city_dynamic_3">
+      <static>true</static>
+      <pose>-8.742072730064455 -17.284555224142185 29.68444125569715 0 0 0</pose>
+      <link name="sphere">
+        <collision name="collision">
+          <geometry>
+            <sphere>
+              <radius>0.5517985896199017</radius>
+            </sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere>
+              <radius>0.5517985896199017</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0.8 0.12 0.8 1</ambient>
+            <diffuse>0.8 0.12 0.8 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="city_dynamic_4">
+      <static>true</static>
+      <pose>6.489327745920672 -22.662583787044397 26.464532847357532 0 0 0</pose>
+      <link name="sphere">
+        <collision name="collision">
+          <geometry>
+            <sphere>
+              <radius>0.6050681020958906</radius>
+            </sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere>
+              <radius>0.6050681020958906</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0.8 0.12 0.8 1</ambient>
+            <diffuse>0.8 0.12 0.8 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="city_dynamic_5">
+      <static>true</static>
+      <pose>-15.826216554176838 14.111188170978433 29.557966134574677 0 0 0</pose>
+      <link name="sphere">
+        <collision name="collision">
+          <geometry>
+            <sphere>
+              <radius>0.5887741697244663</radius>
+            </sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere>
+              <radius>0.5887741697244663</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0.8 0.12 0.8 1</ambient>
+            <diffuse>0.8 0.12 0.8 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="city_dynamic_6">
+      <static>true</static>
+      <pose>31.606286694962165 5.090334152017707 12.288256308828881 0 0 0</pose>
+      <link name="sphere">
+        <collision name="collision">
+          <geometry>
+            <sphere>
+              <radius>0.4962006711074699</radius>
+            </sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere>
+              <radius>0.4962006711074699</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0.8 0.12 0.8 1</ambient>
+            <diffuse>0.8 0.12 0.8 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="city_dynamic_7">
+      <static>true</static>
+      <pose>-7.9417537705419115 -23.398851542167158 30.172246759465178 0 0 0</pose>
+      <link name="sphere">
+        <collision name="collision">
+          <geometry>
+            <sphere>
+              <radius>0.5137321938474413</radius>
+            </sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere>
+              <radius>0.5137321938474413</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0.8 0.12 0.8 1</ambient>
+            <diffuse>0.8 0.12 0.8 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="city_dynamic_8">
+      <static>true</static>
+      <pose>29.743619223490615 -12.048308357646937 25.59512994980646 0 0 0</pose>
+      <link name="sphere">
+        <collision name="collision">
+          <geometry>
+            <sphere>
+              <radius>0.6919244956717046</radius>
+            </sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere>
+              <radius>0.6919244956717046</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0.8 0.12 0.8 1</ambient>
+            <diffuse>0.8 0.12 0.8 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="city_dynamic_9">
+      <static>true</static>
+      <pose>-6.734713215854099 5.107580135143596 29.683008949441238 0 0 0</pose>
+      <link name="sphere">
+        <collision name="collision">
+          <geometry>
+            <sphere>
+              <radius>0.5400243831915215</radius>
+            </sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere>
+              <radius>0.5400243831915215</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0.8 0.12 0.8 1</ambient>
+            <diffuse>0.8 0.12 0.8 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="city_dynamic_10">
+      <static>true</static>
+      <pose>22.68834187815391 18.604831945950533 28.2196130053505 0 0 0</pose>
+      <link name="sphere">
+        <collision name="collision">
+          <geometry>
+            <sphere>
+              <radius>0.5476517343032439</radius>
+            </sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere>
+              <radius>0.5476517343032439</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0.8 0.12 0.8 1</ambient>
+            <diffuse>0.8 0.12 0.8 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>

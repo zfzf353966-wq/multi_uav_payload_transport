@@ -1,0 +1,19 @@
+{
+  "output": "/home/gbc/projects/multi_uav_payload_transport/reports/demo_video_20261102/三机城市配送与PPO动态避障演示.mp4",
+  "duration_s": 226.35,
+  "width": 1280,
+  "height": 720,
+  "fps": "20/1",
+  "codec": "H.264",
+  "audio": "none; embedded Chinese captions",
+  "normal_speed": true,
+  "run": "/home/gbc/projects/multi_uav_payload_transport/runs/delivery_video_20261102",
+  "success": true,
+  "delivered": 6,
+  "returned_home": 3,
+  "sampled_minimum_separation_m": 3.525393300015073,
+  "delivery_path": "/home/gbc/桌面/三机城市配送与PPO动态避障演示.mp4",
+  "file_size_bytes": 4917194,
+  "sha256": "835cf7c330a572e6792c322d9b5343767d731b67bb7cb7956c949ee6e786cd42",
+  "full_decode_check": "passed"
+}

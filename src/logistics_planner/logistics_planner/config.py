@@ -35,6 +35,8 @@ class TaskSettings:
     count: int
     seed: int
     package_quantity: int
+    distribution: str = "random"
+    exclusive_delivery_uav: bool = False
 
 
 @dataclass(frozen=True)
@@ -99,6 +101,8 @@ def load_world_config(path: str | Path) -> WorldConfig:
             count=int(task_generation["count"]),
             seed=int(task_generation["seed"]),
             package_quantity=int(task_generation["package_quantity"]),
+            distribution=str(task_generation.get("distribution", "random")),
+            exclusive_delivery_uav=bool(task_generation.get("exclusive_delivery_uav", False)),
         ),
         planning=PlanningSettings(
             resolution=float(planning["resolution"]),

@@ -87,6 +87,18 @@ def allocate_tasks(
     time_dimension.SetGlobalSpanCostCoefficient(config.planning.makespan_weight)
 
     solver = routing.solver()
+    if config.task_settings.exclusive_delivery_uav:
+        owners = {}
+        for task in tasks:
+            delivery_index = manager.NodeToIndex(task_node_indices[task.id][1])
+            owner = routing.VehicleVar(delivery_index)
+            if task.delivery.id in owners:
+                solver.Add(owner == owners[task.delivery.id])
+            else:
+                owners[task.delivery.id] = owner
+        if len(owners) > len(config.uavs):
+            raise ValueError("Exclusive delivery points exceed the number of UAVs")
+        solver.Add(solver.AllDifferent(list(owners.values())))
     for pickup_node, delivery_node in task_node_indices.values():
         pickup_index = manager.NodeToIndex(pickup_node)
         delivery_index = manager.NodeToIndex(delivery_node)
@@ -96,6 +108,8 @@ def allocate_tasks(
 
     parameters = pywrapcp.DefaultRoutingSearchParameters()
     parameters.first_solution_strategy = (
+        routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        if config.task_settings.exclusive_delivery_uav else
         routing_enums_pb2.FirstSolutionStrategy.PARALLEL_CHEAPEST_INSERTION
     )
     parameters.local_search_metaheuristic = (

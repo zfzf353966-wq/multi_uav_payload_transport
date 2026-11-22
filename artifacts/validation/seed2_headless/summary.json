@@ -1,0 +1,102 @@
+{
+  "success": true,
+  "abort_reason": null,
+  "delivered": [
+    "task_1",
+    "task_2",
+    "task_3",
+    "task_4",
+    "task_5",
+    "task_6"
+  ],
+  "expected_tasks": 6,
+  "landed": [
+    true,
+    true,
+    true
+  ],
+  "max_concurrent_airborne": 3,
+  "returned_home": [
+    true,
+    true,
+    true
+  ],
+  "landing_home_xy_error_m": [
+    0.029514864469401773,
+    0.03029942063315163,
+    0.07914146886775762
+  ],
+  "delivered_by_destination": {
+    "delivery_1": 2,
+    "delivery_2": 2,
+    "delivery_3": 2
+  },
+  "minimum_actual_separation": 3.508640126953427,
+  "ppo_ticks": [
+    168,
+    379,
+    186
+  ],
+  "brake_ticks": [
+    49,
+    191,
+    1
+  ],
+  "potential_field_used": false,
+  "projected_ticks": [
+    326,
+    514,
+    204
+  ],
+  "geometry_audit": {
+    "method": "cruise timestamps matched to sampled Gazebo root poses; UAV radius .45 m; exact building boxes/crowns, conservative trunk boxes; takeoff and landing contact excluded",
+    "samples": [
+      3737,
+      4353,
+      2911
+    ],
+    "minimum_clearance_m": [
+      1.4637841730996652,
+      1.240097520307589,
+      1.473984328203433
+    ],
+    "passed": true
+  },
+  "communication_holds": [
+    {
+      "elapsed_s": 40.59408692999932,
+      "stale_ages_s": {
+        "uav_1:sectors": 0.6766805120005301,
+        "uav_1:down": 0.6765886789999058,
+        "uav_1:telemetry": 0.6288188409998838,
+        "uav_1:cloud": 0.6291169619998982,
+        "uav_1:command": 0.762084167001376,
+        "uav_2:sectors": 0.7749840050000785,
+        "uav_2:down": 0.7647640960003628,
+        "uav_2:telemetry": 0.6958208050000394,
+        "uav_2:cloud": 0.7602876280016062,
+        "uav_2:command": 0.7134818060003454,
+        "uav_3:sectors": 0.7455509820010775,
+        "uav_3:down": 0.7454991290014732,
+        "uav_3:telemetry": 0.6831237639999017,
+        "uav_3:cloud": 0.7041872170011629,
+        "uav_3:command": 0.6984423260000767
+      },
+      "duration_s": 0.05989839900030347
+    }
+  ],
+  "onboard_tasks": [
+    [],
+    [],
+    []
+  ],
+  "package_destination_verified": {
+    "task_1": true,
+    "task_2": true,
+    "task_3": true,
+    "task_4": true,
+    "task_5": true,
+    "task_6": true
+  },
+  "payload_mode": "visual packages follow UAV; mass and cable dynamics not simulated"
+}

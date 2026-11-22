@@ -1,0 +1,184 @@
+{
+  "status": "three_concurrent_visual_delivery_prototype",
+  "validated_run": "runs/delivery_ppo_v1/trial_hook_fixed",
+  "model_sha256": "3c9ab4962486ee04c6556c272fba14023d40dd7cdec0dd7b00ea32f6efe8182c",
+  "altitude_limits": [
+    2.0,
+    32.0
+  ],
+  "selected_policy_num_timesteps": 50000,
+  "model_source": "50,000-step checkpoint selected from the hard-case refinement, initialized from a trained full-height delivery policy.",
+  "validation": {
+    "success": true,
+    "abort_reason": null,
+    "delivered": [
+      "task_1",
+      "task_2",
+      "task_3",
+      "task_4",
+      "task_5",
+      "task_6"
+    ],
+    "expected_tasks": 6,
+    "landed": [
+      true,
+      true,
+      true
+    ],
+    "max_concurrent_airborne": 3,
+    "minimum_actual_separation": 3.2375094916108718,
+    "ppo_ticks": [
+      365,
+      440,
+      310
+    ],
+    "brake_ticks": [
+      0,
+      10,
+      136
+    ],
+    "potential_field_used": false,
+    "projected_ticks": [
+      12,
+      124,
+      18
+    ],
+    "geometry_audit": {
+      "method": "cruise timestamps matched to sampled Gazebo root poses; UAV radius .45 m; exact building boxes/crowns, conservative trunk boxes; takeoff and landing contact excluded",
+      "samples": [
+        2276,
+        2802,
+        2989
+      ],
+      "minimum_clearance_m": [
+        1.2442270909749207,
+        1.3510610189842687,
+        1.3731460367248036
+      ],
+      "passed": true
+    },
+    "communication_holds": [
+      {
+        "elapsed_s": 93.1970808570004,
+        "stale_ages_s": {
+          "uav_1:sectors": 0.6118939020007019,
+          "uav_1:down": 0.6114210240002649,
+          "uav_1:telemetry": 0.581541634000132,
+          "uav_1:command": 0.6632192550005129,
+          "uav_2:sectors": 0.5985890650008514,
+          "uav_2:down": 0.5984512230006658,
+          "uav_2:telemetry": 0.5810602210003708,
+          "uav_3:sectors": 0.5975861330007319,
+          "uav_3:down": 0.5975023220007643,
+          "uav_3:telemetry": 0.5970758750008827,
+          "uav_3:command": 0.6109970950001298
+        },
+        "duration_s": 0.09005810899998323
+      },
+      {
+        "elapsed_s": 98.07448598200062,
+        "stale_ages_s": {
+          "uav_1:sectors": 0.5907164720001674,
+          "uav_1:down": 0.5902727530001357,
+          "uav_1:telemetry": 0.5585641690004195,
+          "uav_2:sectors": 0.5788317730002746,
+          "uav_2:down": 0.5780800630000158,
+          "uav_2:telemetry": 0.5576834240000608,
+          "uav_2:command": 0.6012675800002398,
+          "uav_3:sectors": 0.5732368570006656,
+          "uav_3:down": 0.572084587000063,
+          "uav_3:telemetry": 0.574957049000659,
+          "uav_3:command": 0.5892846890001238
+        },
+        "duration_s": 0.17192128999977285
+      },
+      {
+        "elapsed_s": 100.28727214100036,
+        "stale_ages_s": {
+          "uav_1:sectors": 0.6036086960002649,
+          "uav_1:down": 0.5977933690001009,
+          "uav_1:telemetry": 0.5707953689998249,
+          "uav_2:sectors": 0.5961902110002484,
+          "uav_2:down": 0.5953264110003147,
+          "uav_2:telemetry": 0.570739630999924,
+          "uav_2:command": 0.6164306239998041,
+          "uav_3:sectors": 0.5897340310002619,
+          "uav_3:down": 0.5892218770004547,
+          "uav_3:telemetry": 0.5868815960002394,
+          "uav_3:command": 0.5966491529998166
+        },
+        "duration_s": 0.16435401899980207
+      },
+      {
+        "elapsed_s": 104.29511473900038,
+        "stale_ages_s": {
+          "uav_1:sectors": 0.6145061229999556,
+          "uav_1:down": 0.6086263050001435,
+          "uav_1:telemetry": 0.5827493890001278,
+          "uav_2:sectors": 0.6014443089998167,
+          "uav_2:down": 0.6013639220000186,
+          "uav_2:telemetry": 0.5826930089997404,
+          "uav_3:sectors": 0.597681642999305,
+          "uav_3:down": 0.597040386000117,
+          "uav_3:telemetry": 0.5786754809996637,
+          "uav_3:command": 0.6027259189995675
+        },
+        "duration_s": 0.06424140299986902
+      }
+    ],
+    "onboard_tasks": [
+      [],
+      [],
+      []
+    ],
+    "package_destination_verified": {
+      "task_1": true,
+      "task_2": true,
+      "task_3": true,
+      "task_4": true,
+      "task_5": true,
+      "task_6": true
+    },
+    "payload_mode": "visual packages follow UAV; mass and cable dynamics not simulated"
+  },
+  "validated_runs": [
+    {
+      "seed": 1,
+      "path": "runs/delivery_ppo_v1/seed1_final",
+      "success": true,
+      "delivered": 6,
+      "minimum_separation_m": 3.195025115828256,
+      "minimum_body_clearance_m": 0.2559045835612938,
+      "ppo_ticks": [
+        152,
+        293,
+        145
+      ],
+      "projection_ticks": [
+        19,
+        105,
+        15
+      ],
+      "communication_holds": 1
+    },
+    {
+      "seed": 2,
+      "path": "runs/delivery_ppo_v1/seed2_rejoin",
+      "success": true,
+      "delivered": 6,
+      "minimum_separation_m": 2.84224642805069,
+      "minimum_body_clearance_m": 0.5687360821939575,
+      "ppo_ticks": [
+        191,
+        495,
+        161
+      ],
+      "projection_ticks": [
+        26,
+        224,
+        99
+      ],
+      "communication_holds": 1
+    }
+  ]
+}

@@ -67,15 +67,19 @@ start_group "${RUN_DIR}/ros_gz_bridge.log" \
 
 echo "Starting lidar pose follower and TF publisher..."
 start_group "${RUN_DIR}/lidar_tf_bridge.log" \
-  ros2 run logistics_planner lidar_tf_bridge --ros-args -p use_sim_time:=true
+  ros2 run logistics_planner lidar_tf_bridge --ros-args -p use_sim_time:=true \
+    -p "world:=${PX4_GZ_WORLD:-logistics_city}" -p "level_sensors:=${MUPT_LEVEL_LIDAR:-false}" \
+    -p "native_follow:=${MUPT_NATIVE_LIDAR_FOLLOW:-false}"
 
 echo "Starting 36-value sector observation node..."
 start_group "${RUN_DIR}/sector_observation.log" \
   ros2 run logistics_planner sector_observation --ros-args -p use_sim_time:=true
 
-echo "Starting advisory-only shadow avoidance node..."
-start_group "${RUN_DIR}/shadow_avoidance.log" \
-  ros2 run logistics_planner shadow_avoidance --ros-args -p use_sim_time:=true
+if [[ "${MUPT_AVOIDANCE_MODE:-potential}" != direct ]]; then
+  echo "Starting advisory-only shadow avoidance node..."
+  start_group "${RUN_DIR}/shadow_avoidance.log" \
+    ros2 run logistics_planner shadow_avoidance --ros-args -p use_sim_time:=true
+fi
 
 deadline=$((SECONDS + 20))
 until ros2 topic list 2>/dev/null | grep -Fx "/mupt/uav_3/observation/sectors" >/dev/null; do
@@ -100,7 +104,9 @@ echo "  /mupt/uav_3/scan"
 echo "Three-layer point clouds are available below each scan topic as /points."
 echo "36-value observations are available as /mupt/uav_N/observation/sectors."
 echo "Downward clearance is available as /mupt/uav_N/observation/down_clearance."
-echo "Shadow suggestions are available as /mupt/uav_N/avoidance/*."
+if [[ "${MUPT_AVOIDANCE_MODE:-potential}" != direct ]]; then
+  echo "Shadow suggestions are available as /mupt/uav_N/avoidance/*."
+fi
 echo "Logs: ${RUN_DIR}"
 echo "Press Ctrl-C to stop this bridge (the Gazebo simulation keeps running)."
 

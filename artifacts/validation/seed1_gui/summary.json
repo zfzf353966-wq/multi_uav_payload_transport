@@ -1,0 +1,97 @@
+{
+  "success": true,
+  "abort_reason": null,
+  "delivered": [
+    "task_1",
+    "task_2",
+    "task_3",
+    "task_4",
+    "task_5",
+    "task_6"
+  ],
+  "expected_tasks": 6,
+  "landed": [
+    true,
+    true,
+    true
+  ],
+  "max_concurrent_airborne": 3,
+  "returned_home": [
+    true,
+    true,
+    true
+  ],
+  "landing_home_xy_error_m": [
+    0.2495855578343811,
+    0.07318307369494284,
+    0.06644578153750756
+  ],
+  "delivered_by_destination": {
+    "delivery_1": 2,
+    "delivery_2": 2,
+    "delivery_3": 2
+  },
+  "minimum_actual_separation": 3.599382743581019,
+  "ppo_ticks": [
+    407,
+    336,
+    145
+  ],
+  "brake_ticks": [
+    35,
+    252,
+    5
+  ],
+  "potential_field_used": false,
+  "projected_ticks": [
+    420,
+    463,
+    119
+  ],
+  "geometry_audit": {
+    "method": "cruise timestamps matched to sampled Gazebo root poses; UAV radius .45 m; exact building boxes/crowns, conservative trunk boxes; takeoff and landing contact excluded",
+    "samples": [
+      3942,
+      4299,
+      3161
+    ],
+    "minimum_clearance_m": [
+      1.0402340642210863,
+      1.477938793505474,
+      1.456957901139464
+    ],
+    "passed": true
+  },
+  "communication_holds": [
+    {
+      "elapsed_s": 41.307282542000394,
+      "stale_ages_s": {
+        "uav_1:cloud": 0.5726638050000474,
+        "uav_1:command": 0.5724211529995955,
+        "uav_2:sectors": 0.5721088539994525,
+        "uav_2:down": 0.5720237259993155,
+        "uav_2:cloud": 0.565858150999702,
+        "uav_2:command": 0.5003811159986071,
+        "uav_3:sectors": 0.5440953319994151,
+        "uav_3:down": 0.5440411489998951,
+        "uav_3:cloud": 0.5072600490002515,
+        "uav_3:command": 0.5648944530003064
+      },
+      "duration_s": 0.10297795000042242
+    }
+  ],
+  "onboard_tasks": [
+    [],
+    [],
+    []
+  ],
+  "package_destination_verified": {
+    "task_1": true,
+    "task_2": true,
+    "task_3": true,
+    "task_4": true,
+    "task_5": true,
+    "task_6": true
+  },
+  "payload_mode": "visual packages follow UAV; mass and cable dynamics not simulated"
+}

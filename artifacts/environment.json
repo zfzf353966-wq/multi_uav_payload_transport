@@ -1,0 +1,19 @@
+{
+  "record_date": "2026-11-22",
+  "platform": "Linux-6.8.0-149-generic-x86_64-with-glibc2.35",
+  "python": "3.10.12",
+  "px4_commit": "d6f12ad1c4f70ad3230afd7d86e971421e02fef4",
+  "python_packages": {
+    "torch": "2.7.1+cu128",
+    "numpy": "1.26.4",
+    "scipy": "1.11.4",
+    "gymnasium": "1.2.1",
+    "stable-baselines3": "2.7.1",
+    "ortools": "9.14.6206",
+    "protobuf": "6.31.1",
+    "PyYAML": "5.4.1",
+    "matplotlib": "3.5.1"
+  },
+  "model_contract_check": "passed; 153 observations, 3 actions, altitude max 32 m",
+  "note": "GPU wheel installed locally; runtime inference uses CPU. Fresh-machine installation is documented but has not been executed in a clean machine for this release."
+}

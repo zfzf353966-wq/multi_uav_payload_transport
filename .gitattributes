@@ -1,0 +1,9 @@
+# Keep recorded monitor CSV bytes unchanged (original files use CRLF).
+artifacts/training/**/monitor/*.csv -text -diff
+*.doc binary
+*.docx binary
+*.pdf binary
+*.mp4 binary
+*.png binary
+*.zip binary
+*.gz binary

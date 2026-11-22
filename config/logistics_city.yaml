@@ -43,6 +43,9 @@ task_generation:
   count: 6
   seed: 42
   package_quantity: 1
+  # Cover every delivery marker; one UAV owns all orders at each destination.
+  distribution: balanced
+  exclusive_delivery_uav: true
 
 planning:
   resolution: 1.0

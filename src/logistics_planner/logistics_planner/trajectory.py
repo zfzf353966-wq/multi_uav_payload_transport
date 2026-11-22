@@ -121,6 +121,22 @@ def schedule_routes(
         departure = connector_planner.plan(staging, route.path[1]).points
         arrival = connector_planner.plan(route.path[-2], staging).points
         route_path = [*departure, *route.path[2:-1], *arrival[1:]]
+        if config.task_settings.exclusive_delivery_uav:
+            # A different task allocation can route through an aircraft's
+            # occupied waiting point. A start-time delay cannot resolve that
+            # permanent conflict; route around the other holding volumes.
+            import copy
+            reserved_grid=copy.copy(grid)
+            reserved_grid.occupied=grid.occupied.copy()
+            margin=config.planning.minimum_uav_separation+.3
+            for peer,other_spawn in enumerate(config.uav_spawn_points):
+                if peer==index:continue
+                point=staging_position(other_spawn,peer)
+                reserved_grid._occupy_box(tuple(v-margin for v in point),tuple(v+margin for v in point))
+            reserved_planner=AStar3D(reserved_grid)
+            route_path=[staging]
+            for target in [stop.position for stop in route.stops if stop.kind!='depot']+[staging]:
+                route_path.extend(reserved_planner.plan(route_path[-1],target).points[1:])
         samples = build_continuous_trajectory(
             route_path,
             route.uav.cruise_speed,

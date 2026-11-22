@@ -33,6 +33,8 @@ def _serialize(
         "world": config.name,
         "coordinate_frame": "ENU",
         "algorithm": {
+            "task_distribution": config.task_settings.distribution,
+            "exclusive_delivery_uav": config.task_settings.exclusive_delivery_uav,
             "assignment": "heterogeneous capacitated pickup-delivery VRP (OR-Tools)",
             "global_planner": "3D A* with obstacle inflation and line-of-sight smoothing",
             "resolution": config.planning.resolution,

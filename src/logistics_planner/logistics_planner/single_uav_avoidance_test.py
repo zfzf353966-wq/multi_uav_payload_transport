@@ -23,6 +23,8 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Float32, Float32MultiArray, String
 
+from .direct_ppo_contract import project_safe_velocity, project_directional_velocity, sector_directional_clearance
+
 Point3D = tuple[float, float, float]
 SPAWN_ENU: Point3D = (-34.0, -23.0, 0.13)
 TAKEOFF_ENU: Point3D = (-34.0, -23.0, 6.0)
@@ -103,6 +105,19 @@ def use_rl_for_phase(
         and rl_return
         and distance_to_landing > RL_RETURN_APPROACH_DISTANCE
     )
+
+
+def update_local_activation(active, clear_ticks, minimum_scan, active_age):
+    """Select a local PPO episode from observations, without generating avoidance velocity."""
+    if minimum_scan < 6.0:
+        return True, 0
+    if active and active_age >= 3.0 and minimum_scan > 8.0:
+        clear_ticks += 1
+        if clear_ticks >= 15:
+            return False, 0
+    else:
+        clear_ticks = 0
+    return active, clear_ticks
 
 
 def body_flu_to_ned(vector: Sequence[float], heading: float) -> Point3D:
@@ -309,23 +324,7 @@ def choose_emergency_tangent_sign(
 
 def directional_clearance(sectors: Sequence[float], velocity_body: Sequence[float]) -> float:
     """Return the closest 3x12 sector distance along a body-FLU velocity."""
-    if len(sectors) != 36:
-        return 0.0
-    forward, left, up = map(float, velocity_body)
-    speed = math.sqrt(forward * forward + left * left + up * up)
-    if speed < 0.05:
-        return math.inf
-    azimuth = math.atan2(left, forward)
-    sector = int(round(azimuth / (2.0 * math.pi / 12.0))) % 12
-    elevation = math.atan2(up, math.hypot(forward, left))
-    layer = min(range(3), key=lambda index: abs(elevation - math.radians((-12.0, 0.0, 12.0)[index])))
-    candidates = []
-    for layer_index in range(max(0, layer - 1), min(3, layer + 2)):
-        for offset in (-1, 0, 1):
-            value = float(sectors[layer_index * 12 + (sector + offset) % 12])
-            if math.isfinite(value):
-                candidates.append(value)
-    return min(candidates, default=0.0)
+    return sector_directional_clearance(sectors, velocity_body)
 
 
 def arbitrate_velocity(
@@ -360,6 +359,21 @@ def arbitrate_velocity(
     return ArbitrationResult(candidate, "rl", "accepted")
 
 
+def direct_velocity_decision(velocity, age, sectors, scan_age):
+    """Direct PPO or a zero-velocity safety brake; never use APF guidance."""
+    stopped = (0.0, 0.0, 0.0)
+    if velocity is None or age > .5:
+        return ArbitrationResult(stopped, "fallback", "direct_stale")
+    if len(velocity) != 3 or not all(math.isfinite(v) for v in velocity):
+        return ArbitrationResult(stopped, "fallback", "direct_invalid")
+    if scan_age > .5 or len(sectors) != 36 or not all(math.isfinite(v) for v in sectors):
+        return ArbitrationResult(stopped, "fallback", "scan_stale_or_invalid")
+    candidate, braked = project_directional_velocity(velocity, sectors)
+    if braked:
+        return ArbitrationResult(stopped, "fallback", "safety_brake")
+    return ArbitrationResult(candidate, "rl", "direct_accepted")
+
+
 class SingleUAVAvoidanceTest(Node):
     """Closed-loop lidar avoidance test that commands only PX4 vehicle one."""
 
@@ -370,12 +384,22 @@ class SingleUAVAvoidanceTest(Node):
         avoidance_source: str = "potential",
         rl_return: bool = False,
         output_dir: str | None = None,
+        corridor_length: float = 28.0,
+        local_activation: bool = False,
     ) -> None:
         super().__init__("single_uav_closed_loop_avoidance_test")
         self.namespace = namespace.rstrip("/")
         self.test_label = test_label
         self.avoidance_source = avoidance_source
         self.rl_return = rl_return
+        if not 6 <= corridor_length <= 30:
+            raise ValueError("corridor length must be between 6 and 30 metres")
+        self.outbound_goal_enu = (TAKEOFF_ENU[0] + corridor_length, TAKEOFF_ENU[1], TAKEOFF_ENU[2])
+        self.local_activation = local_activation
+        self.local_active = False
+        self.local_active_started = 0.0
+        self.local_clear_ticks = 0
+        self.route_ticks = 0
         self.system_id = 2
 
         self.output_dir = Path(output_dir).resolve() if output_dir else None
@@ -396,7 +420,8 @@ class SingleUAVAvoidanceTest(Node):
                     "potential_forward", "potential_left", "potential_up",
                     "rl_forward", "rl_left", "rl_up",
                     "command_forward", "command_left", "command_up",
-                    "source", "reason",
+                    "source", "reason", "monotonic_s", "sectors_age_s",
+                    "sectors_json",
                 ),
             )
             self.trace_writer.writeheader()
@@ -482,7 +507,8 @@ class SingleUAVAvoidanceTest(Node):
         )
         self.create_subscription(
             Vector3Stamped,
-            "/mupt/uav_1/rl_shadow/suggested_velocity_body",
+            ("/mupt/uav_1/ppo_direct/velocity_body" if avoidance_source == "direct"
+             else "/mupt/uav_1/rl_shadow/suggested_velocity_body"),
             self._rl_suggestion_callback,
             sensor_qos,
         )
@@ -495,6 +521,7 @@ class SingleUAVAvoidanceTest(Node):
         self.rl_suggested_body: Point3D | None = None
         self.rl_suggestion_time = 0.0
         self.latest_sectors: tuple[float, ...] = tuple([20.0] * 36)
+        self.sectors_time = 0.0
         self.down_clearance = math.inf
         self.down_clearance_time = 0.0
         self.minimum_down_clearance = math.inf
@@ -515,6 +542,8 @@ class SingleUAVAvoidanceTest(Node):
         self.rl_control_ticks = 0
         self.fallback_ticks = 0
         self.traditional_ticks = 0
+        self.approach_ticks = 0
+        self.maximum_vertical_deviation = 0.0
         self.geofence_guard_ticks = 0
         self.emergency_latched = False
         self.emergency_clear_ticks = 0
@@ -529,6 +558,11 @@ class SingleUAVAvoidanceTest(Node):
         self.previous_trace_position: Point3D | None = None
         self.near_ticks = {"rl": 0, "fallback": 0, "potential": 0}
         self.critical_ticks = {"rl": 0, "fallback": 0, "potential": 0}
+        if avoidance_source == "direct":
+            self.near_ticks["approach"] = 0
+            self.critical_ticks["approach"] = 0
+            self.near_ticks["route"] = 0
+            self.critical_ticks["route"] = 0
         self.control_samples = 0
         self.summary_written = False
         self.maximum_lateral_deviation = 0.0
@@ -569,6 +603,7 @@ class SingleUAVAvoidanceTest(Node):
     def _sectors_callback(self, message: Float32MultiArray) -> None:
         if len(message.data) == 36 and all(math.isfinite(value) for value in message.data):
             self.latest_sectors = tuple(float(value) for value in message.data)
+            self.sectors_time = time.monotonic()
         finite = [float(value) for value in message.data if math.isfinite(value) and value > 0.05]
         if finite:
             self.minimum_distance = min(self.minimum_distance, min(finite))
@@ -614,8 +649,8 @@ class SingleUAVAvoidanceTest(Node):
             elif now - self.phase_started > 35.0:
                 self._abort("takeoff did not stabilize within 35 s")
         elif self.phase == "outbound":
-            self._closed_loop_step(OUTBOUND_GOAL_ENU)
-            if self._distance_to(OUTBOUND_GOAL_ENU) <= 1.0:
+            self._closed_loop_step(self.outbound_goal_enu)
+            if self._distance_to(self.outbound_goal_enu) <= 1.0:
                 self.outbound_complete = True
                 self._set_phase("return")
                 self.get_logger().info("outbound goal reached beyond the test obstacle; returning")
@@ -687,6 +722,10 @@ class SingleUAVAvoidanceTest(Node):
         relative_enu = tuple(target[index] - current[index] for index in range(3))
         relative_ned = (relative_enu[1], relative_enu[0], -relative_enu[2])
         self._publish_relative_goal_body(ned_vector_to_body_flu(relative_ned, heading))
+
+        if self.avoidance_source == "direct":
+            self._direct_control_step(current, desired_body, heading)
+            return
 
         now = time.monotonic()
         if now - self.down_clearance_time <= 0.5:
@@ -815,15 +854,86 @@ class SingleUAVAvoidanceTest(Node):
             return
         self._publish_velocity_target(command_ned)
 
+    def _direct_control_step(self, current, desired_body, heading):
+        now = time.monotonic()
+        learned_phase = use_rl_for_phase(self.phase, True, self._distance_to(TAKEOFF_ENU))
+        route_tracking = False
+        if learned_phase and getattr(self, "local_activation", False):
+            was_active = self.local_active
+            self.local_active, self.local_clear_ticks = update_local_activation(
+                self.local_active, self.local_clear_ticks, min(self.latest_sectors), now - self.local_active_started)
+            if self.local_active and not was_active:
+                self.local_active_started = now
+            route_tracking = not self.local_active
+            learned_phase = self.local_active
+        if now - self.sectors_time > .5 or now - self.down_clearance_time > .5:
+            self._abort("direct PPO requires fresh sector and downward observations")
+            return
+        self.minimum_down_clearance = min(self.minimum_down_clearance, self.down_clearance)
+        if learned_phase:
+            decision = direct_velocity_decision(
+                self.rl_suggested_body, now - self.rl_suggestion_time,
+                self.latest_sectors, now - self.sectors_time)
+            if decision.reason in ("direct_stale", "direct_invalid") and now - self.phase_started > 1.5:
+                self._abort("direct PPO velocity became stale or invalid")
+                return
+        else:
+            # Explicit final approach only; this is goal tracking without APF.
+            decision = direct_velocity_decision(desired_body, 0, self.latest_sectors, 0)
+            if decision.source == "rl":
+                decision = ArbitrationResult(decision.velocity_body,
+                                             "route" if route_tracking else "approach",
+                                             "global_tracking" if route_tracking else "precision_approach")
+        projected_body, guard_flags = project_safe_velocity(
+            decision.velocity_body, current[2], self.down_clearance)
+        command_ned = body_flu_to_ned(projected_body, heading)
+        reason = decision.reason
+        if "downward" in guard_flags:
+            self.downward_guard_ticks += 1
+            reason += ":downward_guarded"
+        if "altitude" in guard_flags:
+            self.geofence_guard_ticks += 1
+            reason += ":altitude_guarded"
+        decision = ArbitrationResult(ned_vector_to_body_flu(command_ned, heading), decision.source, reason)
+        if decision.source == "rl":
+            self.rl_control_ticks += 1
+        elif decision.source == "approach":
+            self.approach_ticks += 1
+        elif decision.source == "route":
+            self.route_ticks += 1
+        else:
+            self.fallback_ticks += 1
+        minimum = min(self.latest_sectors)
+        if minimum < 6.0 and learned_phase:
+            self.avoidance_ticks += 1
+        self.contact_risk_ticks = self.contact_risk_ticks + 1 if minimum < MINIMUM_PASS_CLEARANCE else 0
+        self.maximum_contact_risk_ticks = max(self.maximum_contact_risk_ticks, self.contact_risk_ticks)
+        # Preserve the frame that triggers an abort, not just the preceding one.
+        self._record_control_sample(current=current, desired_body=desired_body,
+                                    potential_body=(math.nan, math.nan, math.nan),
+                                    rl_body=self.rl_suggested_body, decision=decision)
+        if self.contact_risk_ticks >= 2:
+            self._abort("direct PPO violated the 0.8 m no-contact gate")
+            return
+        self.maximum_lateral_deviation = max(self.maximum_lateral_deviation, abs(current[1] - TAKEOFF_ENU[1]))
+        self.maximum_vertical_deviation = max(self.maximum_vertical_deviation, abs(current[2] - TAKEOFF_ENU[2]))
+        if not ALTITUDE_MIN_ENU <= current[2] <= ALTITUDE_MAX_ENU:
+            self._abort("direct PPO left altitude safety range")
+            return
+        message = String()
+        message.data = f"mode=direct_3d source={decision.source} reason={reason} potential_field_used=false"
+        self.arbiter_publisher.publish(message)
+        self._publish_velocity_target(command_ned)
+
     def _finish_flight(self) -> None:
         failures = []
         if not self.outbound_complete:
             failures.append("outbound goal was not reached")
         if self.avoidance_ticks < 5:
             failures.append("avoidance did not activate for at least five control ticks")
-        if self.maximum_lateral_deviation < 0.25:
+        if max(self.maximum_lateral_deviation, self.maximum_vertical_deviation) < 0.25:
             failures.append("no measurable lateral detour was produced")
-        if self.avoidance_source == "rl" and self.rl_control_ticks < 20:
+        if self.avoidance_source in ("rl", "direct") and self.rl_control_ticks < 20:
             failures.append("PPO was not accepted for at least twenty control ticks")
         if self.maximum_contact_risk_ticks >= 2:
             failures.append(
@@ -930,6 +1040,9 @@ class SingleUAVAvoidanceTest(Node):
                 "command_left": f"{decision.velocity_body[1]:.4f}",
                 "command_up": f"{decision.velocity_body[2]:.4f}",
                 "source": decision.source, "reason": decision.reason,
+                "monotonic_s": f"{time.monotonic():.6f}",
+                "sectors_age_s": f"{time.monotonic() - self.sectors_time:.6f}",
+                "sectors_json": json.dumps(list(self.latest_sectors)),
             }
         )
 
@@ -942,6 +1055,10 @@ class SingleUAVAvoidanceTest(Node):
         summary = {
             "test_label": self.test_label,
             "configured_source": self.avoidance_source,
+            "outbound_goal_enu": self.outbound_goal_enu,
+            "local_activation": self.local_activation,
+            "global_tracking_ticks": self.route_ticks,
+            "potential_field_used": self.avoidance_source != "direct",
             "success": self.success,
             "abort_reason": self.abort_reason,
             "duration_s": round(time.monotonic() - self.started, 3),
@@ -950,6 +1067,8 @@ class SingleUAVAvoidanceTest(Node):
             "minimum_down_clearance_m": round(self.minimum_down_clearance, 3),
             "maximum_contact_risk_ticks": self.maximum_contact_risk_ticks,
             "maximum_lateral_deviation_m": round(self.maximum_lateral_deviation, 3),
+            "maximum_vertical_deviation_m": round(self.maximum_vertical_deviation, 3),
+            "precision_approach_ticks": self.approach_ticks,
             "control_samples": self.control_samples,
             "all_ticks": {
                 "rl": self.rl_control_ticks,
@@ -1090,7 +1209,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run a closed-loop lidar avoidance test on UAV 1")
     parser.add_argument("--namespace", default="/mupt_px4_1")
     parser.add_argument("--test-label", default="static")
-    parser.add_argument("--avoidance-source", default="potential", choices=("potential", "rl"))
+    parser.add_argument("--avoidance-source", default="potential", choices=("potential", "rl", "direct"))
     parser.add_argument(
         "--rl-return",
         action="store_true",
@@ -1098,6 +1217,8 @@ def main() -> None:
     )
     parser.add_argument("--timeout", type=float, default=190.0)
     parser.add_argument("--output-dir", default="")
+    parser.add_argument("--corridor-length", type=float, default=28.0)
+    parser.add_argument("--local-activation", action="store_true")
     arguments = parser.parse_args()
     rclpy.init()
     node = SingleUAVAvoidanceTest(
@@ -1106,6 +1227,8 @@ def main() -> None:
         arguments.avoidance_source,
         arguments.rl_return,
         arguments.output_dir or None,
+        arguments.corridor_length,
+        arguments.local_activation,
     )
     deadline = time.monotonic() + arguments.timeout
     try:

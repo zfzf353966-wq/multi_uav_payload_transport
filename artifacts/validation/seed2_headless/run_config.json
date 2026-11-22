@@ -1,0 +1,43 @@
+{
+  "world": "logistics_delivery_ppo",
+  "vehicles": 3,
+  "concurrent": true,
+  "global_planner": "3D A*",
+  "local_planner": "PPO direct FLU velocity",
+  "altitude_limits": [
+    2,
+    32
+  ],
+  "potential_field_used": false,
+  "waypoint_lookahead_m": 8,
+  "observation_freshness_s": 0.5,
+  "communication_hold_timeout_s": 2,
+  "service_dwell_s": 2,
+  "service_radius_m": 0.8,
+  "service_speed_mps": 0.45,
+  "fleet_early_yield_m": 3.5,
+  "fleet_acceptance_separation_m": 2.5,
+  "local_takeover": "planned-direction novelty, predicted collision risk, or unknown wide-cloud approach",
+  "sensed_replanning": "temporary A* occupancy from real safety-cloud surface hits; no dynamic truth poses",
+  "safety_layer": "requested velocity-component projection with radial, physical-map and wide-cloud constraints",
+  "safety_cloud": {
+    "vertical_layers": 11,
+    "vertical_degrees": [
+      -60,
+      60
+    ],
+    "range_m": 8,
+    "policy_input": false
+  },
+  "task_distribution": "balanced: two orders at each delivery point; exclusive UAV owner per destination",
+  "return_cruise_altitudes_m": [
+    26,
+    28,
+    30
+  ],
+  "landing_home_xy_tolerance_m": 1.5,
+  "payload_backend": "Gazebo PackageFollower; state transitions acknowledged by native client",
+  "visual_parcels_excluded_from_lidar": true,
+  "model_sha256": "3c9ab4962486ee04c6556c272fba14023d40dd7cdec0dd7b00ea32f6efe8182c",
+  "payload_mode": "visual models; no mass or cable dynamics"
+}

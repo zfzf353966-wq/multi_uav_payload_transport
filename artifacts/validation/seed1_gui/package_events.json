@@ -1,0 +1,92 @@
+[
+  {
+    "vehicle": 3,
+    "kind": "pickup",
+    "task": "task_1",
+    "elapsed_s": 37.635535231000176
+  },
+  {
+    "vehicle": 3,
+    "kind": "pickup",
+    "task": "task_5",
+    "elapsed_s": 40.23254798200105
+  },
+  {
+    "vehicle": 1,
+    "kind": "pickup",
+    "task": "task_2",
+    "elapsed_s": 50.61379359900093
+  },
+  {
+    "vehicle": 2,
+    "kind": "pickup",
+    "task": "task_3",
+    "elapsed_s": 62.22117559000071
+  },
+  {
+    "vehicle": 1,
+    "kind": "delivery",
+    "task": "task_2",
+    "elapsed_s": 70.6105049960006
+  },
+  {
+    "vehicle": 3,
+    "kind": "delivery",
+    "task": "task_5",
+    "elapsed_s": 75.4166665419998
+  },
+  {
+    "vehicle": 3,
+    "kind": "delivery",
+    "task": "task_1",
+    "elapsed_s": 77.91673339000045
+  },
+  {
+    "vehicle": 1,
+    "kind": "pickup",
+    "task": "task_4",
+    "elapsed_s": 90.21072318000006
+  },
+  {
+    "vehicle": 2,
+    "kind": "pickup",
+    "task": "task_6",
+    "elapsed_s": 99.81311632500001
+  },
+  {
+    "vehicle": 1,
+    "kind": "delivery",
+    "task": "task_4",
+    "elapsed_s": 108.91114380600084
+  },
+  {
+    "vehicle": 2,
+    "kind": "delivery",
+    "task": "task_6",
+    "elapsed_s": 120.62268885100093
+  },
+  {
+    "vehicle": 2,
+    "kind": "delivery",
+    "task": "task_3",
+    "elapsed_s": 123.12631956199948
+  },
+  {
+    "vehicle": 3,
+    "kind": "return",
+    "task": null,
+    "elapsed_s": 151.92006162500002
+  },
+  {
+    "vehicle": 1,
+    "kind": "return",
+    "task": null,
+    "elapsed_s": 178.91706235799938
+  },
+  {
+    "vehicle": 2,
+    "kind": "return",
+    "task": null,
+    "elapsed_s": 193.21120389799944
+  }
+]

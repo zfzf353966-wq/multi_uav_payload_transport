@@ -39,7 +39,9 @@ def scenario_parameters(scenario: int) -> list[dict[str, float | str]]:
     return parameters
 
 
-def generate_scenario(template: Path, output: Path, scenario: int) -> None:
+def generate_scenario(template: Path, output: Path, scenario: int, count: int = 3) -> None:
+    if count not in (1, 3):
+        raise ValueError("obstacle count must be 1 or 3")
     tree = ET.parse(template)
     root = tree.getroot()
     model = root.find("model")
@@ -64,6 +66,13 @@ def generate_scenario(template: Path, output: Path, scenario: int) -> None:
         link.text = f"{link_x:.6f} {link_y:.6f} 0 0 0 0"
         joint.text = f"{centre_x:.6f} {centre_y:.6f} 0 0 0 0"
         plugin.text = f"{float(item['speed']):.6f}"
+    if count == 1:
+        for name in ("red", "purple"):
+            for element in list(model):
+                if (element.tag == "link" and element.get("name") == f"{name}_sphere") or (
+                    element.tag == "joint" and element.get("name") == f"{name}_orbit"
+                ) or (element.tag == "plugin" and element.findtext("joint_name") == f"{name}_orbit"):
+                    model.remove(element)
     output.parent.mkdir(parents=True, exist_ok=True)
     tree.write(output, encoding="utf-8", xml_declaration=True)
 
@@ -73,8 +82,9 @@ def main() -> None:
     parser.add_argument("--template", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--scenario", type=int, required=True)
+    parser.add_argument("--count", type=int, choices=(1, 3), default=3)
     arguments = parser.parse_args()
-    generate_scenario(arguments.template, arguments.output, arguments.scenario)
+    generate_scenario(arguments.template, arguments.output, arguments.scenario, arguments.count)
 
 
 if __name__ == "__main__":

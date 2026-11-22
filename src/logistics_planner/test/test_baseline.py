@@ -28,6 +28,13 @@ def test_assignment_and_paths_satisfy_constraints() -> None:
     assert len(routes) == 3
     assert sum(stop.kind == "pickup" for route in routes for stop in route.stops) == len(tasks)
     assert all(route.peak_load <= route.uav.capacity for route in routes)
+    by_destination={location.id:set() for location in config.deliveries}
+    task_by_id={task.id:task for task in tasks}
+    for route in routes:
+        for stop in route.stops:
+            if stop.kind=='delivery':by_destination[task_by_id[stop.task_id].delivery.id].add(route.uav.id)
+    assert all(len(owners)==1 for owners in by_destination.values())
+    assert len(set.union(*by_destination.values()))==3
     assert all(
         grid.segment_is_free(first, second)
         for route in routes

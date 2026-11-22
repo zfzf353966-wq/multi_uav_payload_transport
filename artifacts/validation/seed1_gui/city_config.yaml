@@ -1,0 +1,78 @@
+world:
+  name: logistics_city
+  frame: ENU
+  bounds:
+    min: [-40.0, -30.0, 0.0]
+    max: [40.0, 30.0, 35.0]
+
+depot:
+  center: [-30.0, -23.0, 0.05]
+  approach_position: [-30.0, -23.0, 3.0]
+  uav_spawn_points:
+    # Pad top is z=0.125 m. Starting just above it prevents landing-gear
+    # penetration and the long motor-spool/contact transient at takeoff.
+    - [-34.0, -23.0, 0.13]
+    - [-30.0, -23.0, 0.13]
+    - [-26.0, -23.0, 0.13]
+
+# Axis-aligned building boxes: center [x, y, z], size [x, y, z].
+static_obstacles:
+  - {id: building_1, center: [-21.0, -11.0, 6.0],  size: [12.0, 10.0, 12.0]}
+  - {id: building_2, center: [0.0, -12.0, 9.0],    size: [10.0, 12.0, 18.0]}
+  - {id: building_3, center: [21.0, -11.0, 4.5],   size: [14.0, 10.0, 9.0]}
+  - {id: building_4, center: [-21.0, 12.0, 10.0],  size: [10.0, 14.0, 20.0]}
+  - {id: building_5, center: [0.0, 13.0, 7.0],     size: [14.0, 10.0, 14.0]}
+  - {id: building_6, center: [21.0, 13.0, 11.5],   size: [12.0, 14.0, 23.0]}
+
+pickup_points:
+  - {id: pickup_1, package_position: [-21.0, -11.0, 12.35], approach_position: [-21.0, -11.0, 14.0]}
+  - {id: pickup_2, package_position: [0.0, -12.0, 18.35], approach_position: [0.0, -12.0, 20.0]}
+  - {id: pickup_3, package_position: [0.0, 13.0, 14.35], approach_position: [0.0, 13.0, 16.0]}
+
+delivery_points:
+  - {id: delivery_1, marker_position: [21.0, -11.0, 9.16], approach_position: [21.0, -11.0, 11.0]}
+  - {id: delivery_2, marker_position: [-21.0, 12.0, 20.16], approach_position: [-21.0, 12.0, 22.0]}
+  - {id: delivery_3, marker_position: [21.0, 13.0, 23.16], approach_position: [21.0, 13.0, 25.0]}
+
+uavs:
+  - {id: uav_1, capacity: 1, cruise_speed: 4.0}
+  - {id: uav_2, capacity: 2, cruise_speed: 4.0}
+  - {id: uav_3, capacity: 3, cruise_speed: 4.0}
+
+task_generation:
+  count: 6
+  seed: 42
+  package_quantity: 1
+  # Cover every delivery marker; one UAV owns all orders at each destination.
+  distribution: balanced
+  exclusive_delivery_uav: true
+
+planning:
+  resolution: 1.0
+  safety_margin: 1.0
+  minimum_flight_altitude: 2.0
+  maximum_flight_altitude: 32.0
+  makespan_weight: 100
+  solver_time_limit_seconds: 10
+  trajectory_sample_period: 0.1
+  maximum_acceleration: 2.0
+  corner_radius: 1.0
+  # Extra offline margin absorbs PX4 tracking error; runtime protection uses
+  # a 2.5 m hard separation threshold.
+  minimum_uav_separation: 4.0
+  schedule_step: 0.5
+
+tree_positions:
+  - [-37.0, -10.0, 0.0]
+  - [-36.0, 10.0, 0.0]
+  - [-10.0, -25.0, 0.0]
+  - [11.0, -25.0, 0.0]
+  - [36.0, -5.0, 0.0]
+  - [35.0, 5.0, 0.0]
+
+dynamic_obstacles:
+  - id: moving_obstacle_1
+    type: sphere
+    initial_position: [14.0, 0.0, 8.0]
+    radius: 0.45
+    motion: {type: circle, center: [10.0, 0.0, 8.0], radius: 4.0, angular_speed: 0.5}

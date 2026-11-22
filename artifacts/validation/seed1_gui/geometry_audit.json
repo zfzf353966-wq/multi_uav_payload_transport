@@ -1,0 +1,14 @@
+{
+  "method": "cruise timestamps matched to sampled Gazebo root poses; UAV radius .45 m; exact building boxes/crowns, conservative trunk boxes; takeoff and landing contact excluded",
+  "samples": [
+    3942,
+    4299,
+    3161
+  ],
+  "minimum_clearance_m": [
+    1.0402340642210863,
+    1.477938793505474,
+    1.456957901139464
+  ],
+  "passed": true
+}
